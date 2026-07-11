@@ -243,6 +243,40 @@
         .countdown-box .unit .num{ font-family:'Orbitron',sans-serif; font-size:22px; font-weight:900; color:#fff; display:block; }
         .countdown-box .unit .lbl{ font-size:9px; letter-spacing:.1em; text-transform:uppercase; color:var(--text-muted); }
 
+        .countdown-wrap{ margin: 14px 0; }
+        .countdown-quote-row{ text-align:center; }
+        .countdown-quote{
+            display:inline-block; font-size:12.5px; font-weight:800; color:#fff;
+            background: linear-gradient(90deg, rgba(46,107,255,.28), rgba(139,46,255,.28), rgba(255,46,107,.28));
+            padding:7px 16px; border-radius:999px; margin-bottom:10px;
+            animation: quoteFade 3.2s ease-in-out infinite, quoteGlow 2.4s ease-in-out infinite;
+        }
+        @keyframes quoteFade{ 0%,100%{opacity:.85;} 50%{opacity:1;} }
+        @keyframes quoteGlow{ 0%,100%{ box-shadow:0 0 0 rgba(139,46,255,0);} 50%{ box-shadow:0 0 20px rgba(139,46,255,.4);} }
+
+        .countdown-box{ position:relative; }
+        .countdown-box .unit{
+            position:relative; overflow:hidden;
+            animation: unitPulse 2.6s ease-in-out infinite;
+        }
+        .countdown-box .unit:nth-child(2){ animation-delay:.15s; }
+        .countdown-box .unit:nth-child(3){ animation-delay:.3s; }
+        .countdown-box .unit:nth-child(4){ animation-delay:.45s; }
+        @keyframes unitPulse{ 0%,100%{ box-shadow:0 0 0 rgba(139,46,255,0); transform:translateY(0);} 50%{ box-shadow:0 0 14px rgba(139,46,255,.4); transform:translateY(-2px);} }
+        .countdown-box .unit.urgent{ border-color: var(--neon-red); animation: urgentPulse .9s ease-in-out infinite; }
+        @keyframes urgentPulse{ 0%,100%{ box-shadow:0 0 6px rgba(255,46,107,.3);} 50%{ box-shadow:0 0 22px rgba(255,46,107,.7);} }
+        .countdown-box .unit .num.flip{ animation: numFlip .35s ease; }
+        @keyframes numFlip{ 0%{ transform: rotateX(90deg); opacity:0;} 100%{ transform: rotateX(0deg); opacity:1;} }
+
+        #confetti-canvas{ position:fixed; inset:0; z-index:6000; pointer-events:none; }
+
+        .edit-btn{ background: rgba(46,107,255,.18) !important; border:1px solid var(--neon-blue) !important; color:#bcd0ff !important; box-shadow:none !important; }
+        .edit-btn:hover{ background: rgba(46,107,255,.3) !important; transform: translateY(-2px); }
+        .editing-badge{
+            display:inline-block; padding:5px 14px; border-radius:999px; font-size:11px; font-weight:800;
+            background: rgba(255,184,77,.18); color:#ffcf80; margin-bottom:10px; text-transform:uppercase; letter-spacing:.05em;
+        }
+
         .download-badge{
             display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:700; color:var(--text-muted);
             background:rgba(255,255,255,.06); padding:5px 12px; border-radius:999px; margin-top:10px;
@@ -425,6 +459,7 @@
                     <button class="action-btn" onclick="saveGameLink()">Save link</button>
 
                     <div id="game-details-upload" style="display:none; margin-top: 20px; border-top: 1px dashed rgba(139,46,255,.3); padding-top: 20px;">
+                        <div id="editingBadge" class="editing-badge" style="display:none;">✏️ Editing existing game — changes will update it</div>
                         <div class="upload-area" id="gameImgDrop" onclick="document.getElementById('newGameImgFile').click()">Click to upload a cover image</div>
                         <input type="file" id="newGameImgFile" accept="image/*" style="display:none;">
                         <textarea id="newGameDesc" placeholder="Game description" rows="3"></textarea>
@@ -439,6 +474,7 @@
                             <button class="action-btn" style="flex:1;" onclick="publishGameNow()">Publish Now</button>
                             <button class="action-btn" style="flex:1;" id="scheduleBtn" onclick="handleScheduleClick()">Schedule</button>
                         </div>
+                        <button class="action-btn danger-btn" id="cancelEditBtn" style="width:100%; margin-top:10px; display:none;" onclick="cancelEditGame()">Cancel edit</button>
                     </div>
                 </div>
             </div>
@@ -599,11 +635,22 @@
         let pendingNewsImage = "";
         let pendingStaffNewsImage = "";
         let draftGame = { link: "" };
+        let editingGameId = null;
         let appLoadTime = Date.now();
         let notifFirstSnapshot = true;
         let countdownFlipping = {};
         let cachedNewsList = [];
         let cachedGamesList = [];
+        const hypePhrases = [
+            "🚀 T-minus excitement!",
+            "🎮 Get your fingers warmed up!",
+            "🍿 Grab a snack, the wait's almost over!",
+            "⚡ Something big is loading…",
+            "🌟 Mark your calendars!",
+            "🛠️ Our devs are putting on the finishing touches!",
+            "🎯 Hype levels: rising."
+        ];
+        let hypeTick = 0;
 
         // ==========================================
         // 2. PERSISTENT LOGIN & UI NAV
@@ -1118,42 +1165,76 @@
         // ==========================================
         // 7. POSTS & GAMES PUBLISHING
         // ==========================================
+        // Firestore caps an entire document at ~1MiB. A base64 image embedded
+        // straight into a doc can blow past that on a detailed/high-res photo,
+        // which makes the whole save silently fail (no upload, no error shown,
+        // and the game/post never actually reaches Firestore — which is why it
+        // looked "saved" locally but never appeared for anyone else). This keeps
+        // every encoded image comfortably under that ceiling no matter the source.
+        const MAX_IMAGE_DATAURL_BYTES = 650000;
         function resizeImageToDataUrl(file, maxDim) {
             return new Promise((resolve, reject) => {
                 const img = new Image();
                 const reader = new FileReader();
                 reader.onload = e => { img.src = e.target.result; };
                 reader.onerror = reject;
+                img.onerror = () => reject(new Error("Couldn't read that image file."));
                 img.onload = () => {
                     let { width, height } = img;
                     if (width > height && width > maxDim) { height *= maxDim / width; width = maxDim; }
                     else if (height > maxDim) { width *= maxDim / height; height = maxDim; }
                     const canvas = document.createElement('canvas');
-                    canvas.width = width; canvas.height = height;
-                    canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-                    resolve(canvas.toDataURL('image/jpeg', .8));
+                    canvas.width = Math.max(1, Math.round(width));
+                    canvas.height = Math.max(1, Math.round(height));
+                    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+
+                    let quality = 0.82;
+                    let dataUrl = canvas.toDataURL('image/jpeg', quality);
+                    while (dataUrl.length > MAX_IMAGE_DATAURL_BYTES && quality > 0.35) {
+                        quality -= 0.1;
+                        dataUrl = canvas.toDataURL('image/jpeg', quality);
+                    }
+                    if (dataUrl.length > MAX_IMAGE_DATAURL_BYTES && maxDim > 320) {
+                        // Still too big even at low quality — shrink the dimensions and retry.
+                        resolve(resizeImageToDataUrl(file, Math.round(maxDim * 0.75)));
+                        return;
+                    }
+                    resolve(dataUrl);
                 };
                 reader.readAsDataURL(file);
             });
         }
 
-        document.getElementById('newGameImgFile').addEventListener('change', async e => {
-            const file = e.target.files[0]; if (!file) return;
-            pendingGameImage = await resizeImageToDataUrl(file, 700);
-            const drop = document.getElementById('gameImgDrop');
-            drop.textContent = "Selected: " + file.name;
+        async function handleImageInput(file, dropEl, maxDim, setImage) {
+            if (!file) return;
+            if (file.size > 20 * 1024 * 1024) {
+                alert("That image is too large — please pick something under 20MB.");
+                return;
+            }
+            const original = dropEl.textContent;
+            dropEl.textContent = "Compressing image…";
+            try {
+                const dataUrl = await resizeImageToDataUrl(file, maxDim);
+                setImage(dataUrl);
+                dropEl.textContent = "Selected: " + file.name + " ✓";
+            } catch (err) {
+                console.error(err);
+                alert("Couldn't process that image — try a different file.");
+                dropEl.textContent = original;
+            }
+        }
+
+        document.getElementById('newGameImgFile').addEventListener('change', e => {
+            const file = e.target.files[0];
+            handleImageInput(file, document.getElementById('gameImgDrop'), 700, url => pendingGameImage = url);
         });
-        document.getElementById('newsImgFile').addEventListener('change', async e => {
-            const file = e.target.files[0]; if (!file) return;
-            pendingNewsImage = await resizeImageToDataUrl(file, 900);
-            const drop = document.getElementById('newsImgDrop');
-            drop.textContent = "Selected: " + file.name;
+        document.getElementById('newsImgFile').addEventListener('change', e => {
+            const file = e.target.files[0];
+            handleImageInput(file, document.getElementById('newsImgDrop'), 900, url => pendingNewsImage = url);
         });
-        document.getElementById('staffNewsImgFile').addEventListener('change', async e => {
-            const file = e.target.files[0]; if (!file) return;
-            pendingStaffNewsImage = await resizeImageToDataUrl(file, 900);
-            const drop = document.getElementById('staffNewsImgDrop');
-            drop.textContent = "Selected: " + file.name;
+        document.getElementById('staffNewsImgFile').addEventListener('change', e => {
+            const file = e.target.files[0];
+            handleImageInput(file, document.getElementById('staffNewsImgDrop'), 900, url => pendingStaffNewsImage = url);
         });
 
         function saveGameLink() {
@@ -1170,6 +1251,11 @@
             document.getElementById('scheduleBtn').textContent = 'Schedule';
             pendingGameImage = "";
             draftGame = { link: "" };
+            editingGameId = null;
+            const badge = document.getElementById('editingBadge');
+            if (badge) badge.style.display = 'none';
+            const cancelBtn = document.getElementById('cancelEditBtn');
+            if (cancelBtn) cancelBtn.style.display = 'none';
             document.getElementById('game-details-upload').style.display = 'none';
         }
 
@@ -1177,20 +1263,40 @@
             const desc = document.getElementById('newGameDesc').value.trim();
             if (!desc) return alert("Add a description first.");
             showLoading(true);
-            await db.collection("games").add({ link: draftGame.link, img: pendingGameImage, desc, status: 'draft', downloads: 0, timestamp: new Date() });
-            resetGameUploadForm();
+            try {
+                const payload = { link: draftGame.link, img: pendingGameImage, desc, status: 'draft' };
+                if (editingGameId) {
+                    await db.collection("games").doc(editingGameId).update(payload);
+                } else {
+                    await db.collection("games").add({ ...payload, downloads: 0, timestamp: new Date() });
+                }
+                resetGameUploadForm();
+                switchGameSubTab('view');
+            } catch (e) {
+                console.error(e);
+                alert("Couldn't save this game — check your connection and try again.");
+            }
             showLoading(false);
-            switchGameSubTab('view');
         }
 
         async function publishGameNow() {
             const desc = document.getElementById('newGameDesc').value.trim();
             if (!desc) return alert("Add a description before publishing.");
             showLoading(true);
-            await db.collection("games").add({ link: draftGame.link, img: pendingGameImage, desc, status: 'published', publishedAt: new Date(), downloads: 0, timestamp: new Date() });
-            resetGameUploadForm();
+            try {
+                const payload = { link: draftGame.link, img: pendingGameImage, desc, status: 'published', publishedAt: new Date() };
+                if (editingGameId) {
+                    await db.collection("games").doc(editingGameId).update(payload);
+                } else {
+                    await db.collection("games").add({ ...payload, downloads: 0, timestamp: new Date() });
+                }
+                resetGameUploadForm();
+                switchGameSubTab('view');
+            } catch (e) {
+                console.error(e);
+                alert("Couldn't publish this game — check your connection and try again.");
+            }
             showLoading(false);
-            switchGameSubTab('view');
         }
 
         function handleScheduleClick() {
@@ -1213,24 +1319,85 @@
             if (isNaN(scheduledFor.getTime()) || scheduledFor.getTime() <= Date.now()) return alert("Pick a date and time in the future.");
 
             showLoading(true);
-            const titleGuess = (() => { try { return new URL(draftGame.link).hostname.replace('www.', ''); } catch (e) { return 'New build'; } })();
-            await db.collection("games").add({
-                link: draftGame.link, img: pendingGameImage, desc, status: 'scheduled',
-                scheduledFor: scheduledFor, downloads: 0, timestamp: new Date()
-            });
-            await db.collection('notifications').add({
-                title: titleGuess + ' is coming!',
-                body: titleGuess + ' has gone live for release on ' + scheduledFor.toLocaleString() + '.',
-                sentBy: 'Memud', timestamp: new Date()
-            });
-            resetGameUploadForm();
+            try {
+                const titleGuess = (() => { try { return new URL(draftGame.link).hostname.replace('www.', ''); } catch (e) { return 'New build'; } })();
+                const payload = { link: draftGame.link, img: pendingGameImage, desc, status: 'scheduled', scheduledFor };
+                if (editingGameId) {
+                    await db.collection("games").doc(editingGameId).update(payload);
+                } else {
+                    await db.collection("games").add({ ...payload, downloads: 0, timestamp: new Date() });
+                }
+                await db.collection('notifications').add({
+                    title: titleGuess + ' is coming!',
+                    body: titleGuess + ' has gone live for release on ' + scheduledFor.toLocaleString() + '.',
+                    sentBy: 'Memud', timestamp: new Date()
+                });
+                resetGameUploadForm();
+                switchGameSubTab('view');
+            } catch (e) {
+                console.error(e);
+                alert("Couldn't schedule this game — check your connection and try again.");
+            }
             showLoading(false);
-            switchGameSubTab('view');
+        }
+
+        async function editGame(docId) {
+            showLoading(true);
+            try {
+                const doc = await db.collection('games').doc(docId).get();
+                if (!doc.exists) {
+                    alert("That game couldn't be found — it may have just been deleted.");
+                    showLoading(false);
+                    return;
+                }
+                const g = doc.data();
+                editingGameId = docId;
+                draftGame = { link: g.link || '' };
+                pendingGameImage = g.img || '';
+
+                document.getElementById('newGameLink').value = g.link || '';
+                document.getElementById('newGameDesc').value = g.desc || '';
+                document.getElementById('gameImgDrop').textContent = g.img ? 'Cover image loaded — click to replace' : 'Click to upload a cover image';
+                document.getElementById('game-details-upload').style.display = 'block';
+
+                const badge = document.getElementById('editingBadge');
+                if (badge) badge.style.display = 'block';
+                const cancelBtn = document.getElementById('cancelEditBtn');
+                if (cancelBtn) cancelBtn.style.display = 'block';
+
+                if (g.status === 'scheduled' && g.scheduledFor) {
+                    const ms = g.scheduledFor.toDate ? g.scheduledFor.toDate().getTime() : new Date(g.scheduledFor).getTime();
+                    const local = new Date(ms - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+                    document.getElementById('scheduleDateInput').value = local;
+                    document.getElementById('scheduleDateWrap').style.display = 'block';
+                    document.getElementById('scheduleBtn').textContent = 'Confirm Schedule';
+                } else {
+                    document.getElementById('scheduleDateWrap').style.display = 'none';
+                    document.getElementById('scheduleBtn').textContent = 'Schedule';
+                }
+
+                switchGameSubTab('upload');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } catch (e) {
+                console.error(e);
+                alert("Couldn't load this game for editing — check your connection and try again.");
+            }
+            showLoading(false);
+        }
+
+        function cancelEditGame() {
+            resetGameUploadForm();
         }
 
         async function deleteGame(docId) {
             if (confirm("Delete this game? This can't be undone.")) {
-                await db.collection('games').doc(docId).delete();
+                try {
+                    await db.collection('games').doc(docId).delete();
+                    if (editingGameId === docId) resetGameUploadForm();
+                } catch (e) {
+                    console.error(e);
+                    alert("Couldn't delete this game — check your connection and try again.");
+                }
             }
         }
 
@@ -1254,8 +1421,63 @@
                         body: title + ' has been published — go play it.',
                         sentBy: 'Memud', timestamp: new Date()
                     });
+                    launchConfetti();
                 }
             } catch (e) { console.warn(e); }
+        }
+
+        function launchConfetti() {
+            const old = document.getElementById('confetti-canvas');
+            if (old) old.remove();
+            const canvas = document.createElement('canvas');
+            canvas.id = 'confetti-canvas';
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            document.body.appendChild(canvas);
+            const ctx = canvas.getContext('2d');
+            const colors = ['#2e6bff', '#8b2eff', '#ff2e6b', '#ffb84d', '#35d68c'];
+            const pieces = Array.from({ length: 150 }, () => ({
+                x: Math.random() * canvas.width,
+                y: -20 - Math.random() * canvas.height * 0.4,
+                r: 4 + Math.random() * 5,
+                c: colors[Math.floor(Math.random() * colors.length)],
+                vy: 2 + Math.random() * 3,
+                vx: -1.5 + Math.random() * 3,
+                rot: Math.random() * Math.PI,
+                vr: -0.12 + Math.random() * 0.24
+            }));
+            let frame = 0;
+            function tick() {
+                frame++;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                pieces.forEach(p => {
+                    p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+                    ctx.save();
+                    ctx.translate(p.x, p.y);
+                    ctx.rotate(p.rot);
+                    ctx.fillStyle = p.c;
+                    ctx.fillRect(-p.r / 2, -p.r / 2, p.r, p.r * 1.6);
+                    ctx.restore();
+                });
+                if (frame < 170) requestAnimationFrame(tick);
+                else canvas.remove();
+            }
+            tick();
+        }
+
+        const countdownVibes = [
+            { underMinutes: 1, text: "🎉 It's happening right now!" },
+            { underMinutes: 60, text: "🔥 Final countdown — get hyped!" },
+            { underMinutes: 1440, text: "⏳ Less than a day left!" },
+            { underMinutes: 10080, text: "🚀 Launch week is here!" },
+            { underMinutes: Infinity, text: "✨ Something exciting is coming…" }
+        ];
+        function getCountdownVibe(msLeft) {
+            const minsLeft = msLeft / 60000;
+            for (const v of countdownVibes) {
+                if (minsLeft <= v.underMinutes) return v.text;
+            }
+            return countdownVibes[countdownVibes.length - 1].text;
         }
 
         function formatCountdown(msLeft) {
@@ -1268,25 +1490,57 @@
         }
 
         function countdownHtml(docId, scheduledForMs) {
-            const t = formatCountdown(scheduledForMs - Date.now());
-            return `<div class="countdown-box" data-countdown="${docId}" data-target="${scheduledForMs}">
-                <div class="unit"><span class="num">${t.d}</span><span class="lbl">days</span></div>
-                <div class="unit"><span class="num">${t.h}</span><span class="lbl">hrs</span></div>
-                <div class="unit"><span class="num">${t.m}</span><span class="lbl">min</span></div>
-                <div class="unit"><span class="num">${t.s}</span><span class="lbl">sec</span></div>
+            const msLeft = scheduledForMs - Date.now();
+            const t = formatCountdown(msLeft);
+            const urgent = msLeft < 60 * 60000;
+            const urgentClass = urgent ? ' urgent' : '';
+            return `<div class="countdown-wrap">
+                <div class="countdown-quote-row"><span class="countdown-quote" data-quote="${docId}">${getCountdownVibe(msLeft)}</span></div>
+                <div class="countdown-box" data-countdown="${docId}" data-target="${scheduledForMs}">
+                    <div class="unit${urgentClass}"><span class="num">${t.d}</span><span class="lbl">days</span></div>
+                    <div class="unit${urgentClass}"><span class="num">${t.h}</span><span class="lbl">hrs</span></div>
+                    <div class="unit${urgentClass}"><span class="num">${t.m}</span><span class="lbl">min</span></div>
+                    <div class="unit${urgentClass}"><span class="num">${t.s}</span><span class="lbl">sec</span></div>
+                </div>
             </div>`;
         }
 
         setInterval(() => {
+            hypeTick++;
             document.querySelectorAll('[data-countdown]').forEach(box => {
                 const target = parseInt(box.dataset.target, 10);
-                const t = formatCountdown(target - Date.now());
+                const msLeft = target - Date.now();
+                const t = formatCountdown(msLeft);
                 const nums = box.querySelectorAll('.num');
                 if (nums.length === 4) {
-                    nums[0].textContent = t.d; nums[1].textContent = t.h; nums[2].textContent = t.m; nums[3].textContent = t.s;
+                    const vals = [t.d, t.h, t.m, t.s];
+                    nums.forEach((n, i) => {
+                        const val = String(vals[i]);
+                        if (n.textContent !== val) {
+                            n.textContent = val;
+                            n.classList.remove('flip');
+                            void n.offsetWidth; // restart the flip animation
+                            n.classList.add('flip');
+                        }
+                    });
                 }
-                if (target - Date.now() <= 0) {
-                    const docId = box.dataset.countdown;
+
+                const urgent = msLeft > 0 && msLeft < 60 * 60000;
+                box.querySelectorAll('.unit').forEach(u => u.classList.toggle('urgent', urgent));
+
+                const docId = box.dataset.countdown;
+                const quoteEl = document.querySelector(`.countdown-quote[data-quote="${docId}"]`);
+                if (quoteEl) {
+                    if (msLeft <= 0) {
+                        quoteEl.textContent = "🎉 It's happening right now!";
+                    } else if (urgent) {
+                        quoteEl.textContent = getCountdownVibe(msLeft);
+                    } else if (hypeTick % 4 === 0) {
+                        quoteEl.textContent = hypePhrases[Math.floor(Math.random() * hypePhrases.length)];
+                    }
+                }
+
+                if (msLeft <= 0) {
                     const card = box.closest('.card');
                     const title = card ? (card.dataset.gameTitle || 'This game') : 'This game';
                     checkAndAutoPublish(docId, target, title);
@@ -1314,7 +1568,10 @@
             }
             let adminExtra = '';
             if (context === 'admin') {
-                adminExtra = `<button class="action-btn danger-btn" style="width:100%; margin-top:14px;" onclick="deleteGame('${id}')">Delete game</button>`;
+                adminExtra = `<div style="display:flex; gap:10px; margin-top:14px;">
+                    <button class="action-btn edit-btn" style="flex:1;" onclick="editGame('${id}')">✏️ Edit</button>
+                    <button class="action-btn danger-btn" style="flex:1;" onclick="deleteGame('${id}')">Delete</button>
+                </div>`;
             }
             return `<div class="card" data-game-title="${title}">${statusPill}${body}${adminExtra}</div>`;
         }
@@ -1349,10 +1606,15 @@
             const body = document.getElementById('newsBody').value.trim();
             if (!title || !body) return alert("Add a title and body.");
             showLoading(true);
-            await db.collection("news").add({ title, body, image: pendingNewsImage, author: 'Memud', authorDept: 'Founder & CEO', timestamp: new Date() });
-            document.getElementById('newsTitle').value = ''; document.getElementById('newsBody').value = '';
-            document.getElementById('newsImgDrop').textContent = 'Click to upload an image (optional)';
-            pendingNewsImage = "";
+            try {
+                await db.collection("news").add({ title, body, image: pendingNewsImage, author: 'Memud', authorDept: 'Founder & CEO', timestamp: new Date() });
+                document.getElementById('newsTitle').value = ''; document.getElementById('newsBody').value = '';
+                document.getElementById('newsImgDrop').textContent = 'Click to upload an image (optional)';
+                pendingNewsImage = "";
+            } catch (e) {
+                console.error(e);
+                alert("Couldn't publish this post — check your connection and try again.");
+            }
             showLoading(false);
         }
 
@@ -1361,18 +1623,28 @@
             const body = document.getElementById('staffNewsBody').value.trim();
             if (!title || !body) return alert("Add a title and body.");
             showLoading(true);
-            const authorName = currentStaffData.firstName || 'Staff';
-            const authorDept = currentStaffData.dept || '';
-            await db.collection("news").add({ title, body, image: pendingStaffNewsImage, author: authorName, authorDept, timestamp: new Date() });
-            document.getElementById('staffNewsTitle').value = ''; document.getElementById('staffNewsBody').value = '';
-            document.getElementById('staffNewsImgDrop').textContent = 'Click to upload an image (optional)';
-            pendingStaffNewsImage = "";
+            try {
+                const authorName = currentStaffData.firstName || 'Staff';
+                const authorDept = currentStaffData.dept || '';
+                await db.collection("news").add({ title, body, image: pendingStaffNewsImage, author: authorName, authorDept, timestamp: new Date() });
+                document.getElementById('staffNewsTitle').value = ''; document.getElementById('staffNewsBody').value = '';
+                document.getElementById('staffNewsImgDrop').textContent = 'Click to upload an image (optional)';
+                pendingStaffNewsImage = "";
+            } catch (e) {
+                console.error(e);
+                alert("Couldn't publish this post — check your connection and try again.");
+            }
             showLoading(false);
         }
 
         async function deletePost(docId) {
             if (confirm("Delete this post?")) {
-                await db.collection('news').doc(docId).delete();
+                try {
+                    await db.collection('news').doc(docId).delete();
+                } catch (e) {
+                    console.error(e);
+                    alert("Couldn't delete this post — check your connection and try again.");
+                }
             }
         }
 
