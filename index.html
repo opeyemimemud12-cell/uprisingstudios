@@ -526,6 +526,7 @@
             <div id="game-sub-upload" class="game-sub-view">
                 <h3 style="font-size:20px;">Deploy a new game</h3>
                 <div class="card">
+                    <input type="text" id="newGameName" placeholder="Game name">
                     <input type="text" id="newGameLink" placeholder="Game URL link">
                     <button class="action-btn" onclick="saveGameLink()">Save link</button>
 
@@ -754,7 +755,7 @@
         let pendingGameImage = "";
         let pendingNewsImage = "";
         let pendingStaffNewsImage = "";
-        let draftGame = { link: "" };
+        let draftGame = { title: "", link: "" };
         let editingGameId = null;
         let countdownFlipping = {};
         let cachedNewsList = [];
@@ -1591,19 +1592,22 @@
         });
 
         function saveGameLink() {
+            draftGame.title = document.getElementById('newGameName').value.trim();
             draftGame.link = document.getElementById('newGameLink').value.trim();
+            if (!draftGame.title) return showToast("Give the game a name first.");
             if (!draftGame.link) return showToast("Paste a game link first.");
             document.getElementById('game-details-upload').style.display = 'block';
         }
 
         function resetGameUploadForm() {
+            document.getElementById('newGameName').value = '';
             document.getElementById('newGameLink').value = '';
             document.getElementById('newGameDesc').value = '';
             document.getElementById('gameImgDrop').textContent = 'Click to upload a cover image';
             document.getElementById('scheduleDateWrap').style.display = 'none';
             document.getElementById('scheduleBtn').textContent = 'Schedule';
             pendingGameImage = "";
-            draftGame = { link: "" };
+            draftGame = { title: "", link: "" };
             editingGameId = null;
             const badge = document.getElementById('editingBadge');
             if (badge) badge.style.display = 'none';
@@ -1617,7 +1621,7 @@
             if (!desc) return showToast("Add a description first.");
             showLoading(true);
             try {
-                const payload = { link: draftGame.link, img: pendingGameImage, desc, status: 'draft' };
+                const payload = { title: draftGame.title, link: draftGame.link, img: pendingGameImage, desc, status: 'draft' };
                 if (editingGameId) {
                     await updateRow(TABLES.games, editingGameId, payload);
                 } else {
@@ -1638,7 +1642,7 @@
             if (!desc) return showToast("Add a description before publishing.");
             showLoading(true);
             try {
-                const payload = { link: draftGame.link, img: pendingGameImage, desc, status: 'published', publishedAt: new Date().toISOString() };
+                const payload = { title: draftGame.title, link: draftGame.link, img: pendingGameImage, desc, status: 'published', publishedAt: new Date().toISOString() };
                 if (editingGameId) {
                     await updateRow(TABLES.games, editingGameId, payload);
                 } else {
@@ -1675,16 +1679,15 @@
 
             showLoading(true);
             try {
-                const titleGuess = (() => { try { return new URL(draftGame.link).hostname.replace('www.', ''); } catch (e) { return 'New build'; } })();
-                const payload = { link: draftGame.link, img: pendingGameImage, desc, status: 'scheduled', scheduledFor: scheduledFor.toISOString() };
+                const payload = { title: draftGame.title, link: draftGame.link, img: pendingGameImage, desc, status: 'scheduled', scheduledFor: scheduledFor.toISOString() };
                 if (editingGameId) {
                     await updateRow(TABLES.games, editingGameId, payload);
                 } else {
                     await createRow(TABLES.games, { ...payload, downloads: 0 });
                 }
                 await createRow(TABLES.notifications, {
-                    title: titleGuess + ' is coming!',
-                    body: titleGuess + ' has gone live for release on ' + scheduledFor.toLocaleString() + '.',
+                    title: draftGame.title + ' is coming!',
+                    body: draftGame.title + ' has gone live for release on ' + scheduledFor.toLocaleString() + '.',
                     sentBy: 'Memud'
                 });
                 resetGameUploadForm();
@@ -1707,9 +1710,10 @@
                     return;
                 }
                 editingGameId = docId;
-                draftGame = { link: g.link || '' };
+                draftGame = { title: g.title || '', link: g.link || '' };
                 pendingGameImage = g.img || '';
 
+                document.getElementById('newGameName').value = g.title || '';
                 document.getElementById('newGameLink').value = g.link || '';
                 document.getElementById('newGameDesc').value = g.desc || '';
                 document.getElementById('gameImgDrop').textContent = g.img ? 'Cover image loaded — click to replace' : 'Click to upload a cover image';
