@@ -4,9 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Uprising Studios</title>
-    <!-- Firebase SDKs -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/9.22.1/firebase-app-compat.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/9.22.1/firebase-firestore-compat.min.js"></script>
+    <!-- Appwrite SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/appwrite@26.1.0"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800;900&family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
 
     <style>
@@ -272,10 +271,55 @@
 
         .edit-btn{ background: rgba(46,107,255,.18) !important; border:1px solid var(--neon-blue) !important; color:#bcd0ff !important; box-shadow:none !important; }
         .edit-btn:hover{ background: rgba(46,107,255,.3) !important; transform: translateY(-2px); }
+        .admin-filter-tab{ padding:8px 18px !important; font-size:13px !important; }
+        .admin-filter-tab.active{ background: var(--header-gradient) !important; color:#fff !important; border:none !important; }
         .editing-badge{
             display:inline-block; padding:5px 14px; border-radius:999px; font-size:11px; font-weight:800;
             background: rgba(255,184,77,.18); color:#ffcf80; margin-bottom:10px; text-transform:uppercase; letter-spacing:.05em;
         }
+
+        /* ---- Toast notifications (replaces jarring browser alert()s) ---- */
+        #toast-stack{
+            position:fixed; top:20px; right:20px; z-index:7000;
+            display:flex; flex-direction:column; gap:10px; max-width:340px;
+        }
+        .toast{
+            display:flex; align-items:flex-start; gap:10px;
+            padding:14px 16px; border-radius:16px; font-size:14px; font-weight:600; line-height:1.4;
+            background: rgba(15,17,36,.92); backdrop-filter: blur(10px);
+            border:1px solid rgba(255,255,255,.12);
+            box-shadow: 0 10px 30px rgba(0,0,0,.35);
+            animation: toastIn .35s cubic-bezier(.175,.885,.32,1.275);
+        }
+        .toast.leaving{ animation: toastOut .3s ease forwards; }
+        @keyframes toastIn{ 0%{ transform: translateX(60px); opacity:0; } 100%{ transform: translateX(0); opacity:1; } }
+        @keyframes toastOut{ 0%{ transform: translateX(0); opacity:1; } 100%{ transform: translateX(60px); opacity:0; } }
+        .toast .toast-icon{ font-size:18px; line-height:1; flex-shrink:0; }
+        .toast.success{ border-color: rgba(53,214,140,.4); }
+        .toast.error{ border-color: rgba(255,46,107,.45); }
+        .toast.info{ border-color: rgba(46,107,255,.4); }
+
+        #confirm-overlay{
+            display:none; position:fixed; inset:0; z-index:6500;
+            background: rgba(4,5,14,.72); backdrop-filter: blur(4px);
+            align-items:center; justify-content:center;
+        }
+        #confirm-overlay.show{ display:flex; }
+        #recovery-overlay{
+            display:none; position:fixed; inset:0; z-index:6500;
+            background: rgba(4,5,14,.72); backdrop-filter: blur(4px);
+            align-items:center; justify-content:center;
+        }
+        #recovery-overlay.show{ display:flex; }
+        .confirm-box{
+            background: rgba(18,20,42,.98); border:1px solid rgba(139,46,255,.35);
+            border-radius:22px; padding:26px; max-width:360px; width:90%;
+            box-shadow: 0 20px 60px rgba(0,0,0,.5);
+            animation: toastIn .3s cubic-bezier(.175,.885,.32,1.275);
+        }
+        .confirm-box p{ font-size:15.5px; font-weight:700; line-height:1.5; margin:0 0 20px; }
+        .confirm-btn-row{ display:flex; gap:10px; }
+        .confirm-btn-row .action-btn{ flex:1; }
 
         .download-badge{
             display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:700; color:var(--text-muted);
@@ -319,6 +363,26 @@
         Working on it…
     </div>
 
+    <div id="toast-stack" aria-live="polite"></div>
+
+    <div id="confirm-overlay">
+        <div class="confirm-box">
+            <p id="confirm-message"></p>
+            <div class="confirm-btn-row">
+                <button class="action-btn" id="confirm-cancel-btn" style="background:rgba(255,255,255,.08); box-shadow:none;">Cancel</button>
+                <button class="action-btn danger-btn" id="confirm-ok-btn">Yes, do it</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="recovery-overlay">
+        <div class="confirm-box">
+            <h3 style="margin-top:0; font-size:19px;">Set a new password</h3>
+            <input type="password" id="recoveryNewPass" placeholder="New password (min. 8 characters)">
+            <button class="action-btn" style="width:100%; margin-top:12px;" onclick="completePasswordRecovery()">Update password</button>
+        </div>
+    </div>
+
     <!-- Navigation -->
     <nav>
         <div class="logo-container">
@@ -341,11 +405,13 @@
     <!-- PUBLIC TABS -->
     <div id="public-news" class="section active-section animated">
         <h1>News &amp; Updates</h1>
+        <input type="text" id="newsSearchInput" placeholder="🔍 Search news…" oninput="renderNewsList()" style="max-width:420px; margin-bottom:18px;">
         <div class="grid" id="news-container"></div>
     </div>
 
     <div id="public-games" class="section animated">
         <h1>Our Games</h1>
+        <input type="text" id="gamesSearchInput" placeholder="🔍 Search games…" oninput="renderPublicGamesList()" style="max-width:420px; margin-bottom:18px;">
         <div class="grid" id="games-container"></div>
     </div>
 
@@ -388,6 +454,7 @@
                 <input type="email" id="adminEmail" placeholder="Admin email">
                 <input type="password" id="adminPass" placeholder="Password">
                 <button class="action-btn" style="width: 100%; margin-top: 15px;" onclick="loginAdmin()">Log in</button>
+                <p style="margin-top:12px;"><a href="#" onclick="adminForgotPassword(); return false;" style="color:var(--text-muted); font-size:12.5px; text-decoration:underline;">Forgot password?</a></p>
             </div>
 
             <!-- Staff Login Options -->
@@ -395,15 +462,16 @@
 
                 <div style="background: rgba(255,255,255,0.04); padding: 20px; border-radius: 20px; margin-bottom: 20px; border: 1px solid rgba(139,46,255,.2);">
                     <h4 style="margin-top:0; -webkit-text-fill-color:#fff; background:none;">Already have login details?</h4>
-                    <input type="text" id="staffManualUser" placeholder="Username">
+                    <input type="email" id="staffManualUser" placeholder="Work email">
                     <input type="password" id="staffManualPass" placeholder="Password">
                     <button class="action-btn" style="width: 100%; margin-top: 10px;" onclick="manualStaffLogin()">Log in</button>
+                    <p style="margin-top:10px;"><a href="#" onclick="staffForgotPassword(); return false;" style="color:var(--text-muted); font-size:12.5px; text-decoration:underline;">Forgot password?</a></p>
                 </div>
 
                 <hr style="border: none; border-top: 1px dashed rgba(139,46,255,.3); margin: 20px 0;">
 
                 <h4 style="margin-top:0; -webkit-text-fill-color:#fff; background:none;">First time? Register with your ID card details</h4>
-                <p style="color: var(--text-muted); font-size: 13px; margin-top: -6px;">Type the Name, ID and Department exactly as printed on your Uprising Studios ID card.</p>
+                <p style="color: var(--text-muted); font-size: 13px; margin-top: -6px;">Type the Name, ID and Department exactly as printed on your Uprising Studios ID card, plus a work email and a password you'll remember.</p>
                 <input type="text" id="regName" placeholder="Full name (as on your ID card)">
                 <input type="text" id="regEmployeeId" placeholder="Employee ID (e.g. 2026-001)">
                 <select id="regDept">
@@ -414,15 +482,18 @@
                     <option value="Head of Development">Head of Development</option>
                     <option value="Executive">Executive</option>
                 </select>
-                <button class="action-btn" style="width: 100%;" onclick="registerStaff()">Generate my login</button>
+                <input type="email" id="regEmail" placeholder="Work email (used to log in)">
+                <input type="password" id="regPassword" placeholder="Choose a password (min. 8 characters)">
+                <button class="action-btn" style="width: 100%;" onclick="registerStaff()">Create my login</button>
 
                 <div id="staff-generated-creds" style="display: none; margin-top: 20px; padding-top: 20px; border-top: 1px dashed rgba(139,46,255,.3);">
                     <h3 style="font-size:20px;">You're in!</h3>
                     <div class="cred-reveal">
-                        <p style="margin: 5px 0;">Username: <strong id="genStaffUser" style="color: var(--neon-blue)"></strong></p>
-                        <p style="margin: 5px 0;">Password: <strong id="genStaffPass" style="color: var(--neon-red)"></strong></p>
-                        <p style="margin: 8px 0 0; font-size:12.5px; color: var(--text-muted);">Save these — this is your login from now on.</p>
+                        <p style="margin: 5px 0;">Log in anytime with:</p>
+                        <p style="margin: 5px 0;">Email: <strong id="genStaffUser" style="color: var(--neon-blue)"></strong></p>
+                        <p style="margin: 8px 0 0; font-size:12.5px; color: var(--text-muted);">Your password is the one you just chose — we never store or show it.</p>
                     </div>
+                    <button class="action-btn edit-btn" style="width: 100%; margin-bottom:10px;" onclick="copyStaffCreds()">📋 Copy username &amp; password</button>
                     <button class="action-btn" style="width: 100%;" onclick="loginStaffFromReg()">Go to dashboard</button>
                 </div>
             </div>
@@ -481,6 +552,12 @@
 
             <div id="game-sub-view" class="game-sub-view" style="display:none;">
                 <h3 style="font-size:20px;">All games</h3>
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;" id="adminGameFilterTabs">
+                    <button class="action-btn edit-btn admin-filter-tab active" data-filter="all" onclick="setAdminGameFilter('all', this)">All</button>
+                    <button class="action-btn edit-btn admin-filter-tab" data-filter="draft" onclick="setAdminGameFilter('draft', this)">Drafts</button>
+                    <button class="action-btn edit-btn admin-filter-tab" data-filter="scheduled" onclick="setAdminGameFilter('scheduled', this)">Scheduled</button>
+                    <button class="action-btn edit-btn admin-filter-tab" data-filter="published" onclick="setAdminGameFilter('published', this)">Published</button>
+                </div>
                 <div id="admin-games-list" class="grid"></div>
             </div>
         </div>
@@ -612,20 +689,63 @@
 
     <script>
         // ==========================================
-        // 1. FIREBASE CONFIGURATION
+        // 1. APPWRITE CONFIGURATION
         // ==========================================
-        const firebaseConfig = {
-            apiKey: "AIzaSyDmrMj7YrpgaJWF3J9ccBwZBSu-LCGPDfY",
-            authDomain: "uprisingstudios-67358.firebaseapp.com",
-            databaseURL: "https://uprisingstudios-67358-default-rtdb.firebaseio.com",
-            projectId: "uprisingstudios-67358",
-            storageBucket: "uprisingstudios-67358.firebasestorage.app",
-            messagingSenderId: "589546383627",
-            appId: "1:589546383627:web:b3f1680ac07b4438171a0e"
+        // Fill these in after setting up your Appwrite project — see the
+        // setup guide provided alongside this file for exact console steps
+        // (creating the database, tables/columns, storage bucket, and auth).
+        const APPWRITE_ENDPOINT = 'https://YOUR_REGION.cloud.appwrite.io/v1'; // e.g. https://fra.cloud.appwrite.io/v1 — find this on your project's Overview page
+        const APPWRITE_PROJECT_ID = 'YOUR_PROJECT_ID';
+        const DATABASE_ID = 'uprising_db';
+        const BUCKET_ID = 'media';
+        const TABLES = {
+            games: 'games',
+            news: 'news',
+            applications: 'applications',
+            notifications: 'notifications',
+            admins: 'admins',
+            staffProfiles: 'staff_profiles',
+            settings: 'settings'
         };
 
-        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
+        const client = new Appwrite.Client()
+            .setEndpoint(APPWRITE_ENDPOINT)
+            .setProject(APPWRITE_PROJECT_ID);
+
+        const account = new Appwrite.Account(client);
+        const tablesDB = new Appwrite.TablesDB(client);
+        const storage = new Appwrite.Storage(client);
+        const realtime = new Appwrite.Realtime(client);
+        const { Channel, Query, Permission, Role, ID } = Appwrite;
+
+        // Small wrappers so the rest of the app can talk in plain "rows" the
+        // same shape the old Firestore code used (a .id field, plain data) —
+        // this kept nearly every render function below unchanged.
+        async function getRow(table, rowId) {
+            try {
+                const row = await tablesDB.getRow({ databaseId: DATABASE_ID, tableId: table, rowId });
+                return { id: row.$id, ...row };
+            } catch (e) {
+                if (e.code === 404) return null;
+                throw e;
+            }
+        }
+        async function listRows(table, queries = []) {
+            const res = await tablesDB.listRows({ databaseId: DATABASE_ID, tableId: table, queries });
+            return res.rows.map(r => ({ id: r.$id, ...r }));
+        }
+        async function createRow(table, data, rowId) {
+            return await tablesDB.createRow({ databaseId: DATABASE_ID, tableId: table, rowId: rowId || ID.unique(), data });
+        }
+        async function updateRow(table, rowId, data) {
+            return await tablesDB.updateRow({ databaseId: DATABASE_ID, tableId: table, rowId, data });
+        }
+        async function deleteRow(table, rowId) {
+            return await tablesDB.deleteRow({ databaseId: DATABASE_ID, tableId: table, rowId });
+        }
+        function subscribeTable(table, callback) {
+            realtime.subscribe(Channel.tablesdb(DATABASE_ID).table(table).row(), callback);
+        }
 
         let formRoles = [];
         let formQuestions = [];
@@ -636,11 +756,11 @@
         let pendingStaffNewsImage = "";
         let draftGame = { link: "" };
         let editingGameId = null;
-        let appLoadTime = Date.now();
-        let notifFirstSnapshot = true;
         let countdownFlipping = {};
         let cachedNewsList = [];
         let cachedGamesList = [];
+        let recoveryUserId = null;
+        let recoverySecret = null;
         const hypePhrases = [
             "🚀 T-minus excitement!",
             "🎮 Get your fingers warmed up!",
@@ -655,31 +775,116 @@
         // ==========================================
         // 2. PERSISTENT LOGIN & UI NAV
         // ==========================================
-        document.addEventListener("DOMContentLoaded", async () => {
+        // Appwrite sessions persist on their own (a signed session survives
+        // refreshes), but unlike Firebase there's no built-in "auth state
+        // changed" listener — so we check once on page load, and again
+        // right after any explicit login/registration/logout.
+        async function checkSession() {
+            try {
+                const user = await account.get();
+                await routeAuthenticatedUser(user);
+            } catch (e) {
+                setGuestUI();
+            }
+        }
+
+        async function routeAuthenticatedUser(user) {
+            try {
+                const adminRow = await getRow(TABLES.admins, user.$id);
+                if (adminRow) {
+                    document.getElementById('adminNameSpan').innerText = adminRow.name || 'Admin';
+                    activateDashboardButton('admin');
+                    loadStaffLogins();
+                    listenToApplications();
+                    return;
+                }
+
+                const staffRow = await getRow(TABLES.staffProfiles, user.$id);
+                if (staffRow) {
+                    currentStaffData = { ...staffRow, docId: user.$id };
+                    activateDashboardButton('staff');
+                    setupStaffUI();
+                    return;
+                }
+
+                // Signed in with Appwrite Auth but no matching profile row —
+                // shouldn't normally happen, but fail safe rather than granting access.
+                console.warn('Authenticated user has no admin or staff profile:', user.$id);
+                await account.deleteSession({ sessionId: 'current' });
+                setGuestUI();
+            } catch (e) {
+                console.error(e);
+                showToast("Couldn't verify your account — please try logging in again.", 'error');
+            }
+        }
+
+        function setGuestUI() {
+            currentUserRole = null;
+            currentStaffData = {};
+            document.getElementById('navLoginBtn').style.display = 'inline-block';
+            document.getElementById('navDashboardBtn').style.display = 'none';
+            document.getElementById('navLogoutBtn').style.display = 'none';
+        }
+
+        async function adminForgotPassword() {
+            const email = document.getElementById('adminEmail').value.trim();
+            if (!email) return showToast("Enter your admin email above first, then click 'Forgot password?'.");
+            try {
+                await account.createRecovery({ email, url: window.location.origin + window.location.pathname });
+                showToast("Password reset email sent — check your inbox.", 'success');
+            } catch (e) {
+                console.error(e);
+                showToast("Couldn't send a reset email for that address.", 'error');
+            }
+        }
+
+        async function staffForgotPassword() {
+            const email = document.getElementById('staffManualUser').value.trim();
+            if (!email) return showToast("Enter your work email above first, then click 'Forgot password?'.");
+            try {
+                await account.createRecovery({ email, url: window.location.origin + window.location.pathname });
+                showToast("Password reset email sent — check your inbox.", 'success');
+            } catch (e) {
+                console.error(e);
+                showToast("Couldn't send a reset email for that address.", 'error');
+            }
+        }
+
+        // The reset email Appwrite sends links back to this same page with
+        // ?userId=...&secret=... in the URL — this detects that and prompts
+        // for a new password instead of needing a separate reset page.
+        function checkPasswordRecovery() {
+            const params = new URLSearchParams(window.location.search);
+            const userId = params.get('userId');
+            const secret = params.get('secret');
+            if (userId && secret) {
+                recoveryUserId = userId;
+                recoverySecret = secret;
+                document.getElementById('recovery-overlay').classList.add('show');
+            }
+        }
+
+        async function completePasswordRecovery() {
+            const password = document.getElementById('recoveryNewPass').value;
+            if (!password || password.length < 8) return showToast("Choose a password that's at least 8 characters.", 'error');
+            try {
+                await account.updateRecovery({ userId: recoveryUserId, secret: recoverySecret, password });
+                showToast("Password updated — you can log in now.", 'success');
+                document.getElementById('recovery-overlay').classList.remove('show');
+                history.replaceState({}, '', window.location.pathname);
+            } catch (e) {
+                console.error(e);
+                showToast("That reset link is invalid or has expired — request a new one.", 'error');
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
             reflectNotifButton();
             checkOfflineState();
             initFlappyGame();
             initDashGame();
-            const savedRole = localStorage.getItem('userRole');
-            if (savedRole === 'admin') {
-                activateDashboardButton('admin');
-                document.getElementById('adminNameSpan').innerText = localStorage.getItem('userName') || 'Memud';
-                loadStaffLogins();
-                listenToApplications();
-            } else if (savedRole === 'staff') {
-                const savedUsername = localStorage.getItem('userEmail');
-                if (savedUsername) {
-                    const snap = await db.collection('staff_logins').where('username', '==', savedUsername).limit(1).get();
-                    if (!snap.empty) {
-                        currentStaffData = snap.docs[0].data();
-                        currentStaffData.docId = snap.docs[0].id;
-                        activateDashboardButton('staff');
-                        setupStaffUI();
-                    } else {
-                        logout();
-                    }
-                }
-            }
+            checkSession();
+            checkPasswordRecovery();
         });
 
         function showSection(sectionId) {
@@ -723,7 +928,7 @@
         }
 
         // ==========================================
-        // NOTIFICATIONS (browser Notification API + Firestore log)
+        // NOTIFICATIONS (browser Notification API + Appwrite log)
         // ==========================================
         // Browser permission can only ever be granted or denied by the user via the
         // browser's own prompt — a site can never programmatically revoke it once granted.
@@ -757,10 +962,10 @@
         }
 
         async function toggleNotifications() {
-            if (!('Notification' in window)) { alert('Notifications are not supported in this browser.'); return; }
+            if (!('Notification' in window)) { showToast('Notifications are not supported in this browser.'); return; }
 
             if (Notification.permission === 'denied') {
-                alert('Notifications are blocked for this site in your browser settings. Enable them there, then reload the page to turn alerts back on.');
+                showToast('Notifications are blocked for this site in your browser settings. Enable them there, then reload the page to turn alerts back on.');
                 return;
             }
 
@@ -797,15 +1002,20 @@
             const bodyId = source === 'admin' ? 'adminNotifBody' : 'staffNotifBody';
             const title = document.getElementById(titleId).value.trim();
             const body = document.getElementById(bodyId).value.trim();
-            if (!title || !body) return alert('Add a title and a message first.');
+            if (!title || !body) return showToast('Add a title and a message first.');
             const sentBy = source === 'admin' ? 'Memud' : (currentStaffData.firstName || 'Staff');
-            await db.collection('notifications').add({ title, body, sentBy, timestamp: new Date() });
-            document.getElementById(titleId).value = '';
-            document.getElementById(bodyId).value = '';
+            try {
+                await createRow(TABLES.notifications, { title, body, sentBy });
+                document.getElementById(titleId).value = '';
+                document.getElementById(bodyId).value = '';
+            } catch (e) {
+                console.error(e);
+                showToast("Couldn't send that notification — check your connection and try again.", 'error');
+            }
         }
 
         function renderNotificationsList(list) {
-            const sorted = [...list].sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+            const sorted = [...list].sort((a, b) => new Date(b.$createdAt) - new Date(a.$createdAt));
             const html = sorted.length ? sorted.map(n => `
                 <div class="notif-item">
                     <div class="n-title">${n.title}</div>
@@ -818,18 +1028,22 @@
             if (s) s.innerHTML = html;
         }
 
-        db.collection('notifications').onSnapshot(snapshot => {
-            const all = snapshot.docs.map(d => d.data());
-            renderNotificationsList(all);
-            if (notifFirstSnapshot) { notifFirstSnapshot = false; return; }
-            snapshot.docChanges().forEach(change => {
-                if (change.type === 'added') {
-                    const n = change.doc.data();
-                    const ts = n.timestamp?.toDate ? n.timestamp.toDate().getTime() : Date.now();
-                    if (ts >= appLoadTime - 5000) showBrowserNotification(n.title, n.body);
+        (async function initNotifications() {
+            async function refresh() {
+                try {
+                    const rows = await listRows(TABLES.notifications, [Query.orderDesc('$createdAt'), Query.limit(50)]);
+                    renderNotificationsList(rows);
+                } catch (e) { console.error(e); }
+            }
+            await refresh();
+            realtime.subscribe(Channel.tablesdb(DATABASE_ID).table(TABLES.notifications).row(), response => {
+                refresh();
+                const isCreate = response.events && response.events.some(ev => ev.endsWith('.create'));
+                if (isCreate && response.payload) {
+                    showBrowserNotification(response.payload.title, response.payload.body);
                 }
             });
-        });
+        })();
 
         // ==========================================
         // OFFLINE ARCADE
@@ -868,6 +1082,47 @@
 
         function showLoading(show) { document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none'; }
 
+        // ---- Toast notifications (a nicer, non-blocking swap for browser alert()) ----
+        const TOAST_ICONS = { success: '✅', error: '⚠️', info: '💡' };
+        function showToast(message, type) {
+            type = (type === 'success' || type === 'error') ? type : 'info';
+            const stack = document.getElementById('toast-stack');
+            if (!stack) { console.log(message); return; }
+            const el = document.createElement('div');
+            el.className = 'toast ' + type;
+            el.innerHTML = `<span class="toast-icon">${TOAST_ICONS[type]}</span><span>${message}</span>`;
+            stack.appendChild(el);
+            const remove = () => {
+                el.classList.add('leaving');
+                setTimeout(() => el.remove(), 300);
+            };
+            const timer = setTimeout(remove, 4600);
+            el.addEventListener('click', () => { clearTimeout(timer); remove(); });
+        }
+
+        // ---- Custom confirm dialog (matches the app's look, replaces window.confirm) ----
+        function confirmDialog(message) {
+            return new Promise(resolve => {
+                const overlay = document.getElementById('confirm-overlay');
+                document.getElementById('confirm-message').textContent = message;
+                overlay.classList.add('show');
+
+                const okBtn = document.getElementById('confirm-ok-btn');
+                const cancelBtn = document.getElementById('confirm-cancel-btn');
+
+                function cleanup(result) {
+                    overlay.classList.remove('show');
+                    okBtn.removeEventListener('click', onOk);
+                    cancelBtn.removeEventListener('click', onCancel);
+                    resolve(result);
+                }
+                function onOk() { cleanup(true); }
+                function onCancel() { cleanup(false); }
+                okBtn.addEventListener('click', onOk);
+                cancelBtn.addEventListener('click', onCancel);
+            });
+        }
+
         function activateDashboardButton(role) {
             currentUserRole = role;
             document.getElementById('navLoginBtn').style.display = 'none';
@@ -881,113 +1136,114 @@
             else if (currentUserRole === 'staff') showSection('staff-dashboard');
         }
 
-        function logout() {
-            localStorage.clear();
-            currentUserRole = null;
-            currentStaffData = {};
-            document.getElementById('navLoginBtn').style.display = 'inline-block';
-            document.getElementById('navDashboardBtn').style.display = 'none';
-            document.getElementById('navLogoutBtn').style.display = 'none';
+        async function logout() {
+            try { await account.deleteSession({ sessionId: 'current' }); } catch (e) { console.warn(e); }
+            setGuestUI();
             showSection('public-news');
         }
 
         // ==========================================
         // 3. ADMIN AUTHENTICATION
         // ==========================================
-        function loginAdmin() {
+        // ⚠️ IMPORTANT SECURITY NOTE FOR THE APP OWNER (not shown to users):
+        // This check only gates the UI in this browser tab — it does not
+        // control who can actually write to your database. Anyone who opens
+        // dev tools can call the Appwrite SDK directly, UNLESS your table
+        // and bucket Permissions in the Appwrite console require real
+        // authentication (and, for admin-only actions, membership in the
+        // admins table) for writes. See the setup guide for the exact
+        // permission settings — a login check written only in client-side
+        // JS can never be a security boundary on its own.
+        async function loginAdmin() {
             const email = document.getElementById('adminEmail').value.trim();
             const pass = document.getElementById('adminPass').value;
-
-            if (email === 'opeyemimemud12@gmail.com' && pass === 'Opeyemi2012') {
-                localStorage.setItem('userRole', 'admin');
-                localStorage.setItem('userName', 'Memud');
-                document.getElementById('adminNameSpan').innerText = 'Memud';
-                activateDashboardButton('admin');
-                listenToApplications();
-                loadStaffLogins();
-            } else {
-                alert("Incorrect admin email or password.");
-            }
-        }
-
-        // ==========================================
-        // 4. STAFF LOGIN — manual credentials + manual registration
-        //    (No unreliable ID-image scanning: you type your
-        //    Name / Employee ID / Department exactly as printed
-        //    on your card, and we generate a secure login for you.)
-        // ==========================================
-        async function manualStaffLogin() {
-            const user = document.getElementById('staffManualUser').value.trim();
-            const pass = document.getElementById('staffManualPass').value.trim();
-            if (!user || !pass) return alert("Enter your username and password.");
+            if (!email || !pass) return showToast("Enter your admin email and password.");
 
             showLoading(true);
             try {
-                const snap = await db.collection('staff_logins').where('username', '==', user).limit(1).get();
-                if (!snap.empty && snap.docs[0].data().password === pass) {
-                    currentStaffData = snap.docs[0].data();
-                    currentStaffData.docId = snap.docs[0].id;
-                    localStorage.setItem('userRole', 'staff');
-                    localStorage.setItem('userEmail', user);
-                    activateDashboardButton('staff');
-                    setupStaffUI();
-                } else {
-                    alert("Incorrect username or password.");
-                }
-            } catch (e) { console.error(e); alert("Something went wrong logging in."); }
+                await account.createEmailPasswordSession({ email, password: pass });
+                const user = await account.get();
+                await routeAuthenticatedUser(user);
+            } catch (e) {
+                console.error(e);
+                showToast("Incorrect admin email or password.", 'error');
+            }
             showLoading(false);
         }
 
-        function randomToken(length, chars) {
-            let out = "";
-            for (let i = 0; i < length; i++) out += chars[Math.floor(Math.random() * chars.length)];
-            return out;
+        // ==========================================
+        // 4. STAFF LOGIN — real Appwrite Auth accounts,
+        //    profile details (name/ID/department) kept in the database.
+        // ==========================================
+        async function manualStaffLogin() {
+            const email = document.getElementById('staffManualUser').value.trim();
+            const pass = document.getElementById('staffManualPass').value;
+            if (!email || !pass) return showToast("Enter your work email and password.");
+
+            showLoading(true);
+            try {
+                await account.createEmailPasswordSession({ email, password: pass });
+                const user = await account.get();
+                await routeAuthenticatedUser(user);
+            } catch (e) {
+                console.error(e);
+                showToast("Incorrect email or password.", 'error');
+            }
+            showLoading(false);
         }
 
         async function registerStaff() {
             const fullName = document.getElementById('regName').value.trim();
             const employeeId = document.getElementById('regEmployeeId').value.trim();
             const dept = document.getElementById('regDept').value;
+            const email = document.getElementById('regEmail').value.trim();
+            const password = document.getElementById('regPassword').value;
 
-            if (!fullName || !employeeId || !dept) return alert("Fill in your name, employee ID and department.");
+            if (!fullName || !employeeId || !dept) return showToast("Fill in your name, employee ID and department.");
+            if (!email) return showToast("Enter your work email.");
+            if (!password || password.length < 8) return showToast("Choose a password that's at least 8 characters.");
 
             showLoading(true);
             try {
                 const firstName = fullName.split(' ')[0];
-                const idDigits = employeeId.replace(/[^A-Za-z0-9]/g, '').slice(-4) || randomToken(4, '0123456789');
+                const newUser = await account.create({ userId: ID.unique(), email, password, name: fullName });
+                // Unlike some auth providers, creating an Appwrite account does NOT
+                // start a session automatically — sign in explicitly right after.
+                await account.createEmailPasswordSession({ email, password });
 
-                // Auto-generate a unique username + a strong password
-                let username = (firstName + '.' + idDigits).toLowerCase() + '@uprisingstudios.com';
-                let existing = await db.collection('staff_logins').where('username', '==', username).limit(1).get();
-                if (!existing.empty) {
-                    username = (firstName + '.' + idDigits + randomToken(2, '0123456789')).toLowerCase() + '@uprisingstudios.com';
-                }
-                const passChars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#';
-                const password = randomToken(12, passChars);
+                currentStaffData = { fullName, firstName, dept, employeeId, email };
+                await createRow(TABLES.staffProfiles, currentStaffData, newUser.$id);
+                currentStaffData.docId = newUser.$id;
 
-                currentStaffData = {
-                    fullName, firstName, dept, employeeId,
-                    username, password
-                };
-
-                const docRef = await db.collection("staff_logins").add(currentStaffData);
-                currentStaffData.docId = docRef.id;
-
-                document.getElementById('genStaffUser').innerText = username;
-                document.getElementById('genStaffPass').innerText = password;
+                document.getElementById('genStaffUser').innerText = email;
                 document.getElementById('staff-generated-creds').style.display = 'block';
             } catch (e) {
                 console.error(e);
-                alert("Couldn't create your login — please try again.");
+                if (e.code === 409) {
+                    showToast("That email already has a login — try logging in instead.", 'error');
+                } else if (e.type === 'user_password_mismatch' || e.code === 400) {
+                    showToast("Choose a stronger password (at least 8 characters) and a valid email.", 'error');
+                } else {
+                    showToast("Couldn't create your login — please try again.", 'error');
+                }
             }
             showLoading(false);
         }
 
+        async function copyStaffCreds() {
+            const email = document.getElementById('genStaffUser').innerText;
+            try {
+                await navigator.clipboard.writeText(email);
+                showToast("Email copied to clipboard.", 'success');
+            } catch (e) {
+                showToast("Couldn't copy automatically — please copy it manually.", 'error');
+            }
+        }
+
         function loginStaffFromReg() {
-            localStorage.setItem('userRole', 'staff');
-            localStorage.setItem('userEmail', currentStaffData.username);
-            activateDashboardButton('staff');
-            setupStaffUI();
+            // Already signed in (registerStaff creates the session immediately
+            // after creating the account) — just move to the dashboard.
+            goToDashboard();
         }
 
         function setupStaffUI() {
@@ -997,7 +1253,7 @@
                     <p><strong>Name:</strong> ${currentStaffData.fullName}</p>
                     <p><strong>Department:</strong> ${currentStaffData.dept}</p>
                     <p><strong>Employee ID:</strong> ${currentStaffData.employeeId}</p>
-                    <p><strong>Username:</strong> ${currentStaffData.username}</p>
+                    <p><strong>Email:</strong> ${currentStaffData.email}</p>
                 </div>
             `;
         }
@@ -1005,19 +1261,26 @@
         // ==========================================
         // 5. APPLICATION FORM (LIVE)
         // ==========================================
-        db.collection('settings').doc('app_form').onSnapshot(doc => {
-            if (doc.exists) {
-                const data = doc.data();
-                formRoles = data.roles || [];
-                formQuestions = data.questions || [];
-            } else {
-                formRoles = ["Game Development", "Arts and Design", "Game Testing"];
-                formQuestions = [];
-                db.collection('settings').doc('app_form').set({ roles: formRoles, questions: formQuestions });
+        (async function initFormSettings() {
+            async function refresh() {
+                try {
+                    let row = await getRow(TABLES.settings, 'app_form');
+                    if (!row) {
+                        formRoles = ["Game Development", "Arts and Design", "Game Testing"];
+                        formQuestions = [];
+                        try { await createRow(TABLES.settings, { roles: formRoles, questions: formQuestions }, 'app_form'); }
+                        catch (e) { console.error(e); }
+                    } else {
+                        formRoles = row.roles || [];
+                        formQuestions = row.questions || [];
+                    }
+                    renderPublicForm();
+                    renderAdminFormEditor();
+                } catch (e) { console.error(e); }
             }
-            renderPublicForm();
-            renderAdminFormEditor();
-        });
+            await refresh();
+            subscribeTable(TABLES.settings, refresh);
+        })();
 
         function renderPublicForm() {
             const roleSelect = document.getElementById('appRole');
@@ -1049,22 +1312,42 @@
             const val = document.getElementById('newRoleInput').value.trim();
             if (!val) return;
             formRoles.push(val);
-            await db.collection('settings').doc('app_form').update({ roles: formRoles });
-            document.getElementById('newRoleInput').value = '';
+            try {
+                await updateRow(TABLES.settings, 'app_form', { roles: formRoles });
+                document.getElementById('newRoleInput').value = '';
+            } catch (e) {
+                console.error(e);
+                formRoles.pop();
+                showToast("Couldn't add that — check your connection and try again.", 'error');
+            }
         }
 
         async function addQuestion() {
             const val = document.getElementById('newQuestionInput').value.trim();
             if (!val) return;
             formQuestions.push(val);
-            await db.collection('settings').doc('app_form').update({ questions: formQuestions });
-            document.getElementById('newQuestionInput').value = '';
+            try {
+                await updateRow(TABLES.settings, 'app_form', { questions: formQuestions });
+                document.getElementById('newQuestionInput').value = '';
+            } catch (e) {
+                console.error(e);
+                formQuestions.pop();
+                showToast("Couldn't add that — check your connection and try again.", 'error');
+            }
         }
 
         async function removeFormItem(type, index) {
+            const backup = { roles: [...formRoles], questions: [...formQuestions] };
             if (type === 'roles') formRoles.splice(index, 1);
             if (type === 'questions') formQuestions.splice(index, 1);
-            await db.collection('settings').doc('app_form').update({ roles: formRoles, questions: formQuestions });
+            try {
+                await updateRow(TABLES.settings, 'app_form', { roles: formRoles, questions: formQuestions });
+            } catch (e) {
+                console.error(e);
+                formRoles = backup.roles;
+                formQuestions = backup.questions;
+                showToast("Couldn't remove that — check your connection and try again.", 'error');
+            }
         }
 
         async function submitApplication(e) {
@@ -1077,9 +1360,18 @@
             let customResponses = {};
             formQuestions.forEach((q, index) => customResponses[q] = document.getElementById(`custom_q_${index}`).value);
 
-            await db.collection("applications").add({ name, role, reason, customResponses, status: 'Pending', timestamp: new Date() });
-            alert("Application sent to Uprising Studios — good luck!");
-            document.getElementById('applicationForm').reset();
+            try {
+                await createRow(TABLES.applications, {
+                    name, role, reason,
+                    customResponses: JSON.stringify(customResponses),
+                    status: 'Pending'
+                });
+                showToast("Application sent to Uprising Studios — good luck!", 'success');
+                document.getElementById('applicationForm').reset();
+            } catch (e) {
+                console.error(e);
+                showToast("Couldn't send your application — check your connection and try again.", 'error');
+            }
             showLoading(false);
         }
 
@@ -1087,92 +1379,137 @@
             const name = document.getElementById('statusCheckName').value.trim();
             const box = document.getElementById('statusResult');
             if (!name) { box.innerHTML = ''; return; }
-            const snap = await db.collection('applications').where('name', '==', name).get();
-            if (snap.empty) { box.innerHTML = `<div class="empty-state" style="padding:20px;">No application found under that name.</div>`; return; }
-            let html = '';
-            snap.forEach(doc => {
-                const a = doc.data();
-                const color = a.status === 'Accepted' ? 'var(--secondary-color)' : (a.status === 'Denied' ? '#ff2e6b' : '#ffb84d');
-                html += `<div class="cred-reveal"><p style="margin:4px 0;"><strong>${a.role}</strong></p><p style="margin:4px 0; color:${color}; font-weight:800;">${a.status}</p></div>`;
-            });
-            box.innerHTML = html;
+            try {
+                const rows = await listRows(TABLES.applications, [Query.equal('name', name)]);
+                if (!rows.length) { box.innerHTML = `<div class="empty-state" style="padding:20px;">No application found under that name.</div>`; return; }
+                let html = '';
+                rows.forEach(a => {
+                    const color = a.status === 'Accepted' ? 'var(--secondary-color)' : (a.status === 'Denied' ? '#ff2e6b' : '#ffb84d');
+                    html += `<div class="cred-reveal"><p style="margin:4px 0;"><strong>${a.role}</strong></p><p style="margin:4px 0; color:${color}; font-weight:800;">${a.status}</p></div>`;
+                });
+                box.innerHTML = html;
+            } catch (e) {
+                console.error(e);
+                box.innerHTML = `<div class="empty-state" style="padding:20px;">Couldn't check that right now — try again shortly.</div>`;
+            }
         }
 
         // ==========================================
         // 6. ADMIN — APPLICATIONS & STAFF LOGIN MANAGEMENT
         // ==========================================
         function listenToApplications() {
-            db.collection('applications').onSnapshot(snapshot => {
-                const list = document.getElementById('applications-list');
-                list.innerHTML = '';
-                if (snapshot.empty) { list.innerHTML = '<div class="empty-state">No applications yet.</div>'; return; }
+            async function refresh() {
+                try {
+                    const rows = await listRows(TABLES.applications, [Query.orderDesc('$createdAt')]);
+                    const list = document.getElementById('applications-list');
+                    list.innerHTML = '';
+                    if (!rows.length) { list.innerHTML = '<div class="empty-state">No applications yet.</div>'; return; }
 
-                snapshot.forEach(doc => {
-                    const data = doc.data();
-                    let extraInfo = '';
-                    if (data.customResponses) {
-                        for (let q in data.customResponses) extraInfo += `<p style="margin:5px 0;"><strong>${q}</strong> ${data.customResponses[q]}</p>`;
-                    }
-                    const statusColor = data.status === 'Accepted' ? 'var(--secondary-color)' : (data.status === 'Denied' ? '#ff2e6b' : '#ffb84d');
-                    list.innerHTML += `
-                        <div class="card">
-                            <h3 style="margin-top:0; font-size:19px;">${data.name}</h3>
-                            <p><strong>Department:</strong> ${data.role}</p>
-                            ${extraInfo}
-                            <p style="background:rgba(255,255,255,0.05); padding:15px; border-radius:15px; font-style:italic;">"${data.reason}"</p>
-                            <p style="font-weight:800; color:${statusColor};">${data.status}</p>
-                            <div style="display:flex; gap:10px; margin-top: 15px;">
-                                <button class="action-btn" style="flex:1;" ${data.status==='Accepted' ? 'disabled' : ''} onclick="handleApp('${doc.id}', 'Accepted')">Accept</button>
-                                <button class="action-btn danger-btn" style="flex:1;" ${data.status==='Denied' ? 'disabled' : ''} onclick="handleApp('${doc.id}', 'Denied')">Deny</button>
+                    rows.forEach(data => {
+                        let extraInfo = '';
+                        let customResponses = {};
+                        try { customResponses = data.customResponses ? JSON.parse(data.customResponses) : {}; } catch (e) {}
+                        for (let q in customResponses) extraInfo += `<p style="margin:5px 0;"><strong>${q}</strong> ${customResponses[q]}</p>`;
+                        const statusColor = data.status === 'Accepted' ? 'var(--secondary-color)' : (data.status === 'Denied' ? '#ff2e6b' : '#ffb84d');
+                        list.innerHTML += `
+                            <div class="card">
+                                <h3 style="margin-top:0; font-size:19px;">${data.name}</h3>
+                                <p><strong>Department:</strong> ${data.role}</p>
+                                ${extraInfo}
+                                <p style="background:rgba(255,255,255,0.05); padding:15px; border-radius:15px; font-style:italic;">"${data.reason}"</p>
+                                <p style="font-weight:800; color:${statusColor};">${data.status}</p>
+                                <div style="display:flex; gap:10px; margin-top: 15px;">
+                                    <button class="action-btn" style="flex:1;" ${data.status==='Accepted' ? 'disabled' : ''} onclick="handleApp('${data.id}', 'Accepted')">Accept</button>
+                                    <button class="action-btn danger-btn" style="flex:1;" ${data.status==='Denied' ? 'disabled' : ''} onclick="handleApp('${data.id}', 'Denied')">Deny</button>
+                                </div>
                             </div>
-                        </div>
-                    `;
-                });
-            });
+                        `;
+                    });
+                } catch (e) { console.error(e); }
+            }
+            refresh();
+            subscribeTable(TABLES.applications, refresh);
         }
 
         async function handleApp(docId, decision) {
-            await db.collection('applications').doc(docId).update({ status: decision });
+            try {
+                await updateRow(TABLES.applications, docId, { status: decision });
+            } catch (e) {
+                console.error(e);
+                showToast("Couldn't update that application — check your connection and try again.", 'error');
+            }
         }
 
-        async function loadStaffLogins() {
-            db.collection('staff_logins').onSnapshot(snapshot => {
-                const list = document.getElementById('staff-logins-list');
-                list.innerHTML = '';
-                if (snapshot.empty) { list.innerHTML = '<div class="empty-state">No staff accounts yet.</div>'; return; }
-                snapshot.forEach(doc => {
-                    const data = doc.data();
-                    list.innerHTML += `
-                        <div class="card">
-                            <h4 style="margin-top:0; font-size:16px; -webkit-text-fill-color:#fff; background:none;">${data.fullName || data.firstName}</h4>
-                            <p style="color:var(--text-muted); font-size:12.5px; margin:0 0 8px;">${data.dept || ''} · ID ${data.employeeId || ''}</p>
-                            <input type="text" id="usr_${doc.id}" value="${data.username}">
-                            <input type="text" id="pwd_${doc.id}" value="${data.password}">
-                            <button class="action-btn" style="padding:10px 20px; font-size:14px; margin-top:10px;" onclick="updateLogin('${doc.id}')">Save changes</button>
-                        </div>
-                    `;
-                });
-            });
+        // Staff accounts are now real Appwrite Auth users — there is no
+        // password stored anywhere for the admin to view or edit. Editable
+        // fields are limited to profile info; resetting a password is done
+        // via Appwrite's own "send reset email" flow (the client SDK has no
+        // way to directly set another user's password — that intentionally
+        // requires a server API key, which keeps it out of reach of anyone
+        // who only has access to this front-end code).
+        function loadStaffLogins() {
+            async function refresh() {
+                try {
+                    const rows = await listRows(TABLES.staffProfiles);
+                    const list = document.getElementById('staff-logins-list');
+                    list.innerHTML = '';
+                    if (!rows.length) { list.innerHTML = '<div class="empty-state">No staff accounts yet.</div>'; return; }
+                    rows.forEach(data => {
+                        list.innerHTML += `
+                            <div class="card">
+                                <h4 style="margin-top:0; font-size:16px; -webkit-text-fill-color:#fff; background:none;">${data.fullName || data.firstName}</h4>
+                                <p style="color:var(--text-muted); font-size:12.5px; margin:0 0 8px;">${data.dept || ''} · ID ${data.employeeId || ''}</p>
+                                <input type="text" id="name_${data.id}" value="${data.fullName || ''}" placeholder="Full name">
+                                <input type="text" id="dept_${data.id}" value="${data.dept || ''}" placeholder="Department">
+                                <p style="color:var(--text-muted); font-size:12.5px; margin:8px 0 0;">Login email: <strong style="color:#bcd0ff;">${data.email}</strong></p>
+                                <div style="display:flex; gap:8px; margin-top:10px;">
+                                    <button class="action-btn" style="flex:1; padding:10px 14px; font-size:13.5px;" onclick="updateLogin('${data.id}')">Save changes</button>
+                                    <button class="action-btn edit-btn" style="flex:1; padding:10px 14px; font-size:13.5px;" onclick="sendStaffPasswordReset('${data.email}')">📧 Reset password</button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                } catch (e) { console.error(e); }
+            }
+            refresh();
+            subscribeTable(TABLES.staffProfiles, refresh);
         }
 
         async function updateLogin(docId) {
-            const newUser = document.getElementById(`usr_${docId}`).value.trim();
-            const newPwd = document.getElementById(`pwd_${docId}`).value.trim();
-            await db.collection('staff_logins').doc(docId).update({ username: newUser, password: newPwd });
-            alert("Login details updated.");
+            const newName = document.getElementById(`name_${docId}`).value.trim();
+            const newDept = document.getElementById(`dept_${docId}`).value.trim();
+            try {
+                await updateRow(TABLES.staffProfiles, docId, {
+                    fullName: newName,
+                    firstName: newName.split(' ')[0],
+                    dept: newDept
+                });
+                showToast("Login details updated.", 'success');
+            } catch (e) {
+                console.error(e);
+                showToast("Couldn't save those changes — check your connection and try again.", 'error');
+            }
+        }
+
+        async function sendStaffPasswordReset(email) {
+            try {
+                await account.createRecovery({ email, url: window.location.origin + window.location.pathname });
+                showToast(`Reset email sent to ${email}.`, 'success');
+            } catch (e) {
+                console.error(e);
+                showToast("Couldn't send a reset email for that address.", 'error');
+            }
         }
 
         // ==========================================
         // 7. POSTS & GAMES PUBLISHING
         // ==========================================
-        // Firestore caps an entire document at ~1MiB. A base64 image embedded
-        // straight into a doc can blow past that on a detailed/high-res photo,
-        // which makes the whole save silently fail (no upload, no error shown,
-        // and the game/post never actually reaches Firestore — which is why it
-        // looked "saved" locally but never appeared for anyone else). This keeps
-        // every encoded image comfortably under that ceiling no matter the source.
-        const MAX_IMAGE_DATAURL_BYTES = 650000;
-        function resizeImageToDataUrl(file, maxDim) {
+        // Images now upload to real Appwrite Storage instead of being packed
+        // in as base64 text — this was the root cause of uploads silently
+        // failing before: a base64 image embedded straight into a database
+        // row can be huge, and oversized writes were failing with no error
+        // shown. A real file upload has no such ceiling to worry about.
+        function resizeImageToBlob(file, maxDim, quality = 0.85) {
             return new Promise((resolve, reject) => {
                 const img = new Image();
                 const reader = new FileReader();
@@ -1187,19 +1524,10 @@
                     canvas.width = Math.max(1, Math.round(width));
                     canvas.height = Math.max(1, Math.round(height));
                     canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-
-                    let quality = 0.82;
-                    let dataUrl = canvas.toDataURL('image/jpeg', quality);
-                    while (dataUrl.length > MAX_IMAGE_DATAURL_BYTES && quality > 0.35) {
-                        quality -= 0.1;
-                        dataUrl = canvas.toDataURL('image/jpeg', quality);
-                    }
-                    if (dataUrl.length > MAX_IMAGE_DATAURL_BYTES && maxDim > 320) {
-                        // Still too big even at low quality — shrink the dimensions and retry.
-                        resolve(resizeImageToDataUrl(file, Math.round(maxDim * 0.75)));
-                        return;
-                    }
-                    resolve(dataUrl);
+                    canvas.toBlob(blob => {
+                        if (!blob) { reject(new Error("Couldn't process that image.")); return; }
+                        resolve(blob);
+                    }, 'image/jpeg', quality);
                 };
                 reader.readAsDataURL(file);
             });
@@ -1208,18 +1536,27 @@
         async function handleImageInput(file, dropEl, maxDim, setImage) {
             if (!file) return;
             if (file.size > 20 * 1024 * 1024) {
-                alert("That image is too large — please pick something under 20MB.");
+                showToast("That image is too large — please pick something under 20MB.", 'error');
                 return;
             }
             const original = dropEl.textContent;
-            dropEl.textContent = "Compressing image…";
+            dropEl.textContent = "Uploading image…";
             try {
-                const dataUrl = await resizeImageToDataUrl(file, maxDim);
-                setImage(dataUrl);
+                const blob = await resizeImageToBlob(file, maxDim);
+                const cleanName = (file.name.replace(/\.[^.]+$/, '') || 'image') + '.jpg';
+                const uploadFile = new File([blob], cleanName, { type: 'image/jpeg' });
+                const uploaded = await storage.createFile({
+                    bucketId: BUCKET_ID,
+                    fileId: ID.unique(),
+                    file: uploadFile,
+                    permissions: [Permission.read(Role.any())]
+                });
+                const url = storage.getFileView({ bucketId: BUCKET_ID, fileId: uploaded.$id });
+                setImage(url);
                 dropEl.textContent = "Selected: " + file.name + " ✓";
             } catch (err) {
                 console.error(err);
-                alert("Couldn't process that image — try a different file.");
+                showToast("Couldn't upload that image — try a different file.", 'error');
                 dropEl.textContent = original;
             }
         }
@@ -1239,7 +1576,7 @@
 
         function saveGameLink() {
             draftGame.link = document.getElementById('newGameLink').value.trim();
-            if (!draftGame.link) return alert("Paste a game link first.");
+            if (!draftGame.link) return showToast("Paste a game link first.");
             document.getElementById('game-details-upload').style.display = 'block';
         }
 
@@ -1261,40 +1598,42 @@
 
         async function saveGameAsDraft() {
             const desc = document.getElementById('newGameDesc').value.trim();
-            if (!desc) return alert("Add a description first.");
+            if (!desc) return showToast("Add a description first.");
             showLoading(true);
             try {
                 const payload = { link: draftGame.link, img: pendingGameImage, desc, status: 'draft' };
                 if (editingGameId) {
-                    await db.collection("games").doc(editingGameId).update(payload);
+                    await updateRow(TABLES.games, editingGameId, payload);
                 } else {
-                    await db.collection("games").add({ ...payload, downloads: 0, timestamp: new Date() });
+                    await createRow(TABLES.games, { ...payload, downloads: 0 });
                 }
                 resetGameUploadForm();
                 switchGameSubTab('view');
+                showToast(editingGameId ? "Draft updated." : "Saved as draft.", 'success');
             } catch (e) {
                 console.error(e);
-                alert("Couldn't save this game — check your connection and try again.");
+                showToast("Couldn't save this game — check your connection and try again.", 'error');
             }
             showLoading(false);
         }
 
         async function publishGameNow() {
             const desc = document.getElementById('newGameDesc').value.trim();
-            if (!desc) return alert("Add a description before publishing.");
+            if (!desc) return showToast("Add a description before publishing.");
             showLoading(true);
             try {
-                const payload = { link: draftGame.link, img: pendingGameImage, desc, status: 'published', publishedAt: new Date() };
+                const payload = { link: draftGame.link, img: pendingGameImage, desc, status: 'published', publishedAt: new Date().toISOString() };
                 if (editingGameId) {
-                    await db.collection("games").doc(editingGameId).update(payload);
+                    await updateRow(TABLES.games, editingGameId, payload);
                 } else {
-                    await db.collection("games").add({ ...payload, downloads: 0, timestamp: new Date() });
+                    await createRow(TABLES.games, { ...payload, downloads: 0 });
                 }
                 resetGameUploadForm();
                 switchGameSubTab('view');
+                showToast("🚀 Published! It's live now.", 'success');
             } catch (e) {
                 console.error(e);
-                alert("Couldn't publish this game — check your connection and try again.");
+                showToast("Couldn't publish this game — check your connection and try again.", 'error');
             }
             showLoading(false);
         }
@@ -1313,30 +1652,31 @@
         async function confirmSchedule() {
             const desc = document.getElementById('newGameDesc').value.trim();
             const dateVal = document.getElementById('scheduleDateInput').value;
-            if (!desc) return alert("Add a description first.");
-            if (!dateVal) return alert("Pick a release date and time first.");
+            if (!desc) return showToast("Add a description first.");
+            if (!dateVal) return showToast("Pick a release date and time first.");
             const scheduledFor = new Date(dateVal);
-            if (isNaN(scheduledFor.getTime()) || scheduledFor.getTime() <= Date.now()) return alert("Pick a date and time in the future.");
+            if (isNaN(scheduledFor.getTime()) || scheduledFor.getTime() <= Date.now()) return showToast("Pick a date and time in the future.");
 
             showLoading(true);
             try {
                 const titleGuess = (() => { try { return new URL(draftGame.link).hostname.replace('www.', ''); } catch (e) { return 'New build'; } })();
-                const payload = { link: draftGame.link, img: pendingGameImage, desc, status: 'scheduled', scheduledFor };
+                const payload = { link: draftGame.link, img: pendingGameImage, desc, status: 'scheduled', scheduledFor: scheduledFor.toISOString() };
                 if (editingGameId) {
-                    await db.collection("games").doc(editingGameId).update(payload);
+                    await updateRow(TABLES.games, editingGameId, payload);
                 } else {
-                    await db.collection("games").add({ ...payload, downloads: 0, timestamp: new Date() });
+                    await createRow(TABLES.games, { ...payload, downloads: 0 });
                 }
-                await db.collection('notifications').add({
+                await createRow(TABLES.notifications, {
                     title: titleGuess + ' is coming!',
                     body: titleGuess + ' has gone live for release on ' + scheduledFor.toLocaleString() + '.',
-                    sentBy: 'Memud', timestamp: new Date()
+                    sentBy: 'Memud'
                 });
                 resetGameUploadForm();
                 switchGameSubTab('view');
+                showToast("⏳ Scheduled! It'll auto-publish and confetti when it goes live.", 'success');
             } catch (e) {
                 console.error(e);
-                alert("Couldn't schedule this game — check your connection and try again.");
+                showToast("Couldn't schedule this game — check your connection and try again.", 'error');
             }
             showLoading(false);
         }
@@ -1344,13 +1684,12 @@
         async function editGame(docId) {
             showLoading(true);
             try {
-                const doc = await db.collection('games').doc(docId).get();
-                if (!doc.exists) {
-                    alert("That game couldn't be found — it may have just been deleted.");
+                const g = await getRow(TABLES.games, docId);
+                if (!g) {
+                    showToast("That game couldn't be found — it may have just been deleted.", 'error');
                     showLoading(false);
                     return;
                 }
-                const g = doc.data();
                 editingGameId = docId;
                 draftGame = { link: g.link || '' };
                 pendingGameImage = g.img || '';
@@ -1366,7 +1705,7 @@
                 if (cancelBtn) cancelBtn.style.display = 'block';
 
                 if (g.status === 'scheduled' && g.scheduledFor) {
-                    const ms = g.scheduledFor.toDate ? g.scheduledFor.toDate().getTime() : new Date(g.scheduledFor).getTime();
+                    const ms = new Date(g.scheduledFor).getTime();
                     const local = new Date(ms - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
                     document.getElementById('scheduleDateInput').value = local;
                     document.getElementById('scheduleDateWrap').style.display = 'block';
@@ -1380,7 +1719,7 @@
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             } catch (e) {
                 console.error(e);
-                alert("Couldn't load this game for editing — check your connection and try again.");
+                showToast("Couldn't load this game for editing — check your connection and try again.", 'error');
             }
             showLoading(false);
         }
@@ -1390,22 +1729,23 @@
         }
 
         async function deleteGame(docId) {
-            if (confirm("Delete this game? This can't be undone.")) {
+            const ok = await confirmDialog("Delete this game? This can't be undone.");
+            if (ok) {
                 try {
-                    await db.collection('games').doc(docId).delete();
+                    await deleteRow(TABLES.games, docId);
                     if (editingGameId === docId) resetGameUploadForm();
+                    showToast("Game deleted.", 'success');
                 } catch (e) {
                     console.error(e);
-                    alert("Couldn't delete this game — check your connection and try again.");
+                    showToast("Couldn't delete this game — check your connection and try again.", 'error');
                 }
             }
         }
 
         async function incrementDownload(docId) {
             try {
-                await db.collection('games').doc(docId).update({
-                    downloads: firebase.firestore.FieldValue.increment(1)
-                });
+                const row = await getRow(TABLES.games, docId);
+                if (row) await updateRow(TABLES.games, docId, { downloads: (row.downloads || 0) + 1 });
             } catch (e) { console.warn(e); }
         }
 
@@ -1413,13 +1753,13 @@
             if (countdownFlipping[docId]) return;
             countdownFlipping[docId] = true;
             try {
-                const doc = await db.collection('games').doc(docId).get();
-                if (doc.exists && doc.data().status === 'scheduled') {
-                    await db.collection('games').doc(docId).update({ status: 'published', publishedAt: new Date() });
-                    await db.collection('notifications').add({
+                const row = await getRow(TABLES.games, docId);
+                if (row && row.status === 'scheduled') {
+                    await updateRow(TABLES.games, docId, { status: 'published', publishedAt: new Date().toISOString() });
+                    await createRow(TABLES.notifications, {
                         title: title + ' is out now!',
                         body: title + ' has been published — go play it.',
-                        sentBy: 'Memud', timestamp: new Date()
+                        sentBy: 'Memud'
                     });
                     launchConfetti();
                 }
@@ -1556,7 +1896,7 @@
                 statusPill = '<span class="pill-status draft">Draft</span>';
                 body = `<p style="font-size:14px; color:var(--text-muted);">${g.desc}</p>`;
             } else if (g.status === 'scheduled') {
-                const ms = g.scheduledFor && g.scheduledFor.toDate ? g.scheduledFor.toDate().getTime() : 0;
+                const ms = g.scheduledFor ? new Date(g.scheduledFor).getTime() : 0;
                 statusPill = '<span class="pill-status scheduled">Scheduled</span>';
                 body = `<p style="font-size:14px; color:var(--text-muted);">${g.desc}</p>` + countdownHtml(id, ms);
             } else {
@@ -1579,41 +1919,75 @@
         // ==========================================
         // 8. LIVE PUBLIC / ADMIN GAME + POST LISTENERS
         // ==========================================
-        db.collection('games').orderBy('timestamp', 'desc').onSnapshot(snapshot => {
-            const all = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-            const publicVisible = all.filter(g => g.status === 'published' || g.status === 'scheduled');
+        let latestGamesAll = [];
+        let adminGameFilter = 'all';
+
+        function setAdminGameFilter(filter, btnEl) {
+            adminGameFilter = filter;
+            document.querySelectorAll('.admin-filter-tab').forEach(b => b.classList.remove('active'));
+            btnEl.classList.add('active');
+            renderAdminGamesList();
+        }
+
+        function gameMatchesSearch(g, query) {
+            if (!query) return true;
+            const haystack = ((g.desc || '') + ' ' + (g.link || '')).toLowerCase();
+            return haystack.includes(query);
+        }
+
+        function renderPublicGamesList() {
+            const query = (document.getElementById('gamesSearchInput')?.value || '').trim().toLowerCase();
+            const publicVisible = latestGamesAll
+                .filter(g => g.status === 'published' || g.status === 'scheduled')
+                .filter(g => gameMatchesSearch(g, query));
             const publicHtml = publicVisible.length
                 ? publicVisible.map(g => gameCardHtml(g.id, g, 'public')).join('')
-                : '<div class="empty-state" style="grid-column: 1 / -1;">No games published yet — check back soon.</div>';
+                : `<div class="empty-state" style="grid-column: 1 / -1;">${query ? 'No games match your search.' : 'No games published yet — check back soon.'}</div>`;
 
             const pCont = document.getElementById('games-container');
             const sCont = document.getElementById('staff-games-container');
             if (pCont) pCont.innerHTML = publicHtml;
             if (sCont) sCont.innerHTML = publicHtml;
+        }
 
+        function renderAdminGamesList() {
             const adminList = document.getElementById('admin-games-list');
-            if (adminList) {
-                adminList.innerHTML = all.length
-                    ? all.map(g => gameCardHtml(g.id, g, 'admin')).join('')
-                    : '<div class="empty-state" style="grid-column: 1 / -1;">Nothing uploaded yet.</div>';
-            }
+            if (!adminList) return;
+            const filtered = adminGameFilter === 'all'
+                ? latestGamesAll
+                : latestGamesAll.filter(g => g.status === adminGameFilter);
+            adminList.innerHTML = filtered.length
+                ? filtered.map(g => gameCardHtml(g.id, g, 'admin')).join('')
+                : `<div class="empty-state" style="grid-column: 1 / -1;">${adminGameFilter === 'all' ? 'Nothing uploaded yet.' : 'Nothing here yet.'}</div>`;
+        }
 
-            cacheGamesLocally(all);
-        });
+        (async function initGamesFeed() {
+            async function refresh() {
+                try {
+                    latestGamesAll = await listRows(TABLES.games, [Query.orderDesc('$createdAt')]);
+                    renderPublicGamesList();
+                    renderAdminGamesList();
+                    cacheGamesLocally(latestGamesAll);
+                } catch (e) { console.error(e); }
+            }
+            await refresh();
+            subscribeTable(TABLES.games, refresh);
+        })();
 
         async function publishNews() {
             const title = document.getElementById('newsTitle').value.trim();
             const body = document.getElementById('newsBody').value.trim();
-            if (!title || !body) return alert("Add a title and body.");
+            if (!title || !body) return showToast("Add a title and body.");
             showLoading(true);
             try {
-                await db.collection("news").add({ title, body, image: pendingNewsImage, author: 'Memud', authorDept: 'Founder & CEO', timestamp: new Date() });
+                await createRow(TABLES.news, { title, body, image: pendingNewsImage, author: 'Memud', authorDept: 'Founder & CEO' });
                 document.getElementById('newsTitle').value = ''; document.getElementById('newsBody').value = '';
                 document.getElementById('newsImgDrop').textContent = 'Click to upload an image (optional)';
                 pendingNewsImage = "";
+                showToast("Post published.", 'success');
             } catch (e) {
                 console.error(e);
-                alert("Couldn't publish this post — check your connection and try again.");
+                showToast("Couldn't publish this post — check your connection and try again.", 'error');
             }
             showLoading(false);
         }
@@ -1621,50 +1995,61 @@
         async function publishNewsStaff() {
             const title = document.getElementById('staffNewsTitle').value.trim();
             const body = document.getElementById('staffNewsBody').value.trim();
-            if (!title || !body) return alert("Add a title and body.");
+            if (!title || !body) return showToast("Add a title and body.");
             showLoading(true);
             try {
                 const authorName = currentStaffData.firstName || 'Staff';
                 const authorDept = currentStaffData.dept || '';
-                await db.collection("news").add({ title, body, image: pendingStaffNewsImage, author: authorName, authorDept, timestamp: new Date() });
+                await createRow(TABLES.news, { title, body, image: pendingStaffNewsImage, author: authorName, authorDept });
                 document.getElementById('staffNewsTitle').value = ''; document.getElementById('staffNewsBody').value = '';
                 document.getElementById('staffNewsImgDrop').textContent = 'Click to upload an image (optional)';
                 pendingStaffNewsImage = "";
+                showToast("Post published.", 'success');
             } catch (e) {
                 console.error(e);
-                alert("Couldn't publish this post — check your connection and try again.");
+                showToast("Couldn't publish this post — check your connection and try again.", 'error');
             }
             showLoading(false);
         }
 
         async function deletePost(docId) {
-            if (confirm("Delete this post?")) {
+            const ok = await confirmDialog("Delete this post?");
+            if (ok) {
                 try {
-                    await db.collection('news').doc(docId).delete();
+                    await deleteRow(TABLES.news, docId);
+                    showToast("Post deleted.", 'success');
                 } catch (e) {
                     console.error(e);
-                    alert("Couldn't delete this post — check your connection and try again.");
+                    showToast("Couldn't delete this post — check your connection and try again.", 'error');
                 }
             }
         }
 
-        db.collection('news').orderBy('timestamp', 'desc').onSnapshot(snapshot => {
-            const container = document.getElementById('news-container');
-            let html = '';
-            const list = [];
+        let latestNewsList = [];
 
-            if (snapshot.empty) {
-                html = '<div class="empty-state" style="grid-column: 1 / -1;">No news yet — check back soon.</div>';
+        function newsMatchesSearch(n, query) {
+            if (!query) return true;
+            const haystack = ((n.title || '') + ' ' + (n.body || '') + ' ' + (n.author || '')).toLowerCase();
+            return haystack.includes(query);
+        }
+
+        function renderNewsList() {
+            const container = document.getElementById('news-container');
+            if (!container) return;
+            const query = (document.getElementById('newsSearchInput')?.value || '').trim().toLowerCase();
+            const filtered = latestNewsList.filter(n => newsMatchesSearch(n, query));
+            let html = '';
+
+            if (!filtered.length) {
+                html = `<div class="empty-state" style="grid-column: 1 / -1;">${query ? 'No posts match your search.' : 'No news yet — check back soon.'}</div>`;
             } else {
-                snapshot.forEach(doc => {
-                    const n = doc.data();
-                    list.push(n);
+                filtered.forEach(n => {
                     const imgTag = n.image ? `<img src="${n.image}" style="margin-top:10px; max-height:250px; object-fit:cover;">` : '';
                     const deptBadge = n.authorDept ? ` <span class="author-dept">&middot; ${n.authorDept}</span>` : '';
 
                     let deleteBtn = '';
                     if (currentUserRole === 'admin' || (currentUserRole === 'staff' && n.author === currentStaffData.firstName)) {
-                        deleteBtn = `<button class="action-btn danger-btn" style="margin-top: 15px; width:100%;" onclick="deletePost('${doc.id}')">Delete post</button>`;
+                        deleteBtn = `<button class="action-btn danger-btn" style="margin-top: 15px; width:100%;" onclick="deletePost('${n.id}')">Delete post</button>`;
                     }
 
                     html += `
@@ -1679,9 +2064,20 @@
                     `;
                 });
             }
-            if (container) container.innerHTML = html;
-            cacheNewsLocally(list);
-        });
+            container.innerHTML = html;
+        }
+
+        (async function initNewsFeed() {
+            async function refresh() {
+                try {
+                    latestNewsList = await listRows(TABLES.news, [Query.orderDesc('$createdAt')]);
+                    renderNewsList();
+                    cacheNewsLocally(latestNewsList);
+                } catch (e) { console.error(e); }
+            }
+            await refresh();
+            subscribeTable(TABLES.news, refresh);
+        })();
 
 
         // ==========================================
