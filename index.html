@@ -468,34 +468,6 @@
                     <p style="margin-top:10px;"><a href="#" onclick="staffForgotPassword(); return false;" style="color:var(--text-muted); font-size:12.5px; text-decoration:underline;">Forgot password?</a></p>
                 </div>
 
-                <hr style="border: none; border-top: 1px dashed rgba(139,46,255,.3); margin: 20px 0;">
-
-                <h4 style="margin-top:0; -webkit-text-fill-color:#fff; background:none;">First time? Register with your ID card details</h4>
-                <p style="color: var(--text-muted); font-size: 13px; margin-top: -6px;">Type the Name, ID and Department exactly as printed on your Uprising Studios ID card, plus a work email and a password you'll remember.</p>
-                <input type="text" id="regName" placeholder="Full name (as on your ID card)">
-                <input type="text" id="regEmployeeId" placeholder="Employee ID (e.g. 2026-001)">
-                <select id="regDept">
-                    <option value="" disabled selected>Select your department</option>
-                    <option value="Game Development">Game Development</option>
-                    <option value="Arts and Design">Arts and Design</option>
-                    <option value="Game Testing">Game Testing</option>
-                    <option value="Head of Development">Head of Development</option>
-                    <option value="Executive">Executive</option>
-                </select>
-                <input type="email" id="regEmail" placeholder="Work email (used to log in)">
-                <input type="password" id="regPassword" placeholder="Choose a password (min. 8 characters)">
-                <button class="action-btn" style="width: 100%;" onclick="registerStaff()">Create my login</button>
-
-                <div id="staff-generated-creds" style="display: none; margin-top: 20px; padding-top: 20px; border-top: 1px dashed rgba(139,46,255,.3);">
-                    <h3 style="font-size:20px;">You're in!</h3>
-                    <div class="cred-reveal">
-                        <p style="margin: 5px 0;">Log in anytime with:</p>
-                        <p style="margin: 5px 0;">Email: <strong id="genStaffUser" style="color: var(--neon-blue)"></strong></p>
-                        <p style="margin: 8px 0 0; font-size:12.5px; color: var(--text-muted);">Your password is the one you just chose — we never store or show it.</p>
-                    </div>
-                    <button class="action-btn edit-btn" style="width: 100%; margin-bottom:10px;" onclick="copyStaffCreds()">📋 Copy username &amp; password</button>
-                    <button class="action-btn" style="width: 100%;" onclick="loginStaffFromReg()">Go to dashboard</button>
-                </div>
             </div>
         </div>
     </div>
@@ -504,7 +476,7 @@
     <div id="admin-dashboard" class="section animated">
         <h1>Welcome, <span id="adminNameSpan">Memud</span></h1>
         <div class="dashboard-tabs">
-            <button class="dash-tab active" onclick="switchAdminTab('admin-logins', this)">Login Details</button>
+            <button class="dash-tab active" onclick="switchAdminTab('admin-logins', this)">Logins</button>
             <button class="dash-tab" onclick="switchAdminTab('admin-games', this)">Games</button>
             <button class="dash-tab" onclick="switchAdminTab('admin-posts', this)">Posts &amp; News</button>
             <button class="dash-tab" onclick="switchAdminTab('admin-apps', this)">Applications</button>
@@ -513,6 +485,34 @@
         </div>
 
         <div id="admin-logins" class="admin-view active-section">
+            <h3 style="font-size:20px;">Add a new login</h3>
+            <div class="card" style="max-width:640px; margin-bottom:35px;">
+                <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:0 15px;">
+                    <input type="text" id="newStaffName" placeholder="Full name">
+                    <input type="text" id="newStaffId" placeholder="ID">
+                    <select id="newStaffDept">
+                        <option value="" disabled selected>Department</option>
+                        <option value="Game Development">Game Development</option>
+                        <option value="Arts and Design">Arts and Design</option>
+                        <option value="Game Testing">Game Testing</option>
+                        <option value="Head of Development">Head of Development</option>
+                        <option value="Executive">Executive</option>
+                    </select>
+                </div>
+                <input type="email" id="newStaffEmail" placeholder="Work email (used to log in)">
+                <button class="action-btn" style="width:100%; margin-top:14px;" onclick="createStaffAccount()">Add account</button>
+
+                <div id="admin-generated-creds" style="display:none; margin-top:20px; padding-top:20px; border-top:1px dashed rgba(139,46,255,.3);">
+                    <h4 style="margin-top:0; -webkit-text-fill-color:#fff; background:none;">Account created</h4>
+                    <div class="cred-reveal">
+                        <p style="margin:5px 0;">Email: <strong id="genAdminStaffEmail" style="color:var(--neon-blue)"></strong></p>
+                        <p style="margin:5px 0;">Temporary password: <strong id="genAdminStaffPass" style="color:var(--neon-blue)"></strong></p>
+                        <p style="margin:8px 0 0; font-size:12.5px; color:var(--text-muted);">Share these with them directly — they can log in under the Staff tab and reset the password anytime with "Forgot password?".</p>
+                    </div>
+                    <button class="action-btn edit-btn" style="width:100%;" onclick="copyGeneratedCreds()">📋 Copy email &amp; password</button>
+                </div>
+            </div>
+
             <h3 style="font-size:20px;">Registered Staff</h3>
             <div id="staff-logins-list" class="grid"></div>
         </div>
@@ -1192,58 +1192,74 @@
             showLoading(false);
         }
 
-        async function registerStaff() {
-            const fullName = document.getElementById('regName').value.trim();
-            const employeeId = document.getElementById('regEmployeeId').value.trim();
-            const dept = document.getElementById('regDept').value;
-            const email = document.getElementById('regEmail').value.trim();
-            const password = document.getElementById('regPassword').value;
+        // ==========================================
+        // ADMIN-CREATED STAFF ACCOUNTS
+        // ==========================================
+        // Staff can no longer self-register — only a logged-in admin can add
+        // a new login here. A random temporary password is generated so the
+        // admin never has to invent or store one manually; it's shown once
+        // so it can be shared with the staff member, who can reset it later
+        // themselves via "Forgot password?" on the Staff login tab.
+        function generateTempPassword() {
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+            const bytes = new Uint32Array(14);
+            crypto.getRandomValues(bytes);
+            return Array.from(bytes, b => chars[b % chars.length]).join('');
+        }
 
-            if (!fullName || !employeeId || !dept) return showToast("Fill in your name, employee ID and department.");
-            if (!email) return showToast("Enter your work email.");
-            if (!password || password.length < 8) return showToast("Choose a password that's at least 8 characters.");
+        async function createStaffAccount() {
+            const fullName = document.getElementById('newStaffName').value.trim();
+            const employeeId = document.getElementById('newStaffId').value.trim();
+            const dept = document.getElementById('newStaffDept').value;
+            const email = document.getElementById('newStaffEmail').value.trim();
+
+            if (!fullName || !employeeId || !dept) return showToast("Fill in name, ID and department.");
+            if (!email) return showToast("Enter a work email for this login.");
 
             showLoading(true);
             try {
                 const firstName = fullName.split(' ')[0];
-                const newUser = await account.create({ userId: ID.unique(), email, password, name: fullName });
-                // Unlike some auth providers, creating an Appwrite account does NOT
-                // start a session automatically — sign in explicitly right after.
-                await account.createEmailPasswordSession({ email, password });
+                const tempPassword = generateTempPassword();
 
-                currentStaffData = { fullName, firstName, dept, employeeId, email };
-                await createRow(TABLES.staffProfiles, currentStaffData, newUser.$id);
-                currentStaffData.docId = newUser.$id;
+                // account.create() only creates the user record — it does NOT
+                // start a session, so the admin stays logged in as themselves.
+                const newUser = await account.create({ userId: ID.unique(), email, password: tempPassword, name: fullName });
 
-                document.getElementById('genStaffUser').innerText = email;
-                document.getElementById('staff-generated-creds').style.display = 'block';
+                const profileData = { fullName, firstName, dept, employeeId, email };
+                await createRow(TABLES.staffProfiles, profileData, newUser.$id);
+
+                document.getElementById('genAdminStaffEmail').innerText = email;
+                document.getElementById('genAdminStaffPass').innerText = tempPassword;
+                document.getElementById('admin-generated-creds').style.display = 'block';
+
+                document.getElementById('newStaffName').value = '';
+                document.getElementById('newStaffId').value = '';
+                document.getElementById('newStaffDept').value = '';
+                document.getElementById('newStaffEmail').value = '';
+
+                showToast("Staff account created.", 'success');
             } catch (e) {
                 console.error(e);
                 if (e.code === 409) {
-                    showToast("That email already has a login — try logging in instead.", 'error');
-                } else if (e.type === 'user_password_mismatch' || e.code === 400) {
-                    showToast("Choose a stronger password (at least 8 characters) and a valid email.", 'error');
+                    showToast("That email already has a login.", 'error');
+                } else if (e.code === 400) {
+                    showToast("Check the email is valid and try again.", 'error');
                 } else {
-                    showToast("Couldn't create your login — please try again.", 'error');
+                    showToast("Couldn't create that login — please try again.", 'error');
                 }
             }
             showLoading(false);
         }
 
-        async function copyStaffCreds() {
-            const email = document.getElementById('genStaffUser').innerText;
+        async function copyGeneratedCreds() {
+            const email = document.getElementById('genAdminStaffEmail').innerText;
+            const pass = document.getElementById('genAdminStaffPass').innerText;
             try {
-                await navigator.clipboard.writeText(email);
-                showToast("Email copied to clipboard.", 'success');
+                await navigator.clipboard.writeText(`Email: ${email}\nPassword: ${pass}`);
+                showToast("Email & password copied to clipboard.", 'success');
             } catch (e) {
                 showToast("Couldn't copy automatically — please copy it manually.", 'error');
             }
-        }
-
-        function loginStaffFromReg() {
-            // Already signed in (registerStaff creates the session immediately
-            // after creating the account) — just move to the dashboard.
-            goToDashboard();
         }
 
         function setupStaffUI() {
