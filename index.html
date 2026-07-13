@@ -432,12 +432,6 @@
                 <button type="submit" class="action-btn" style="width: 100%; margin-top: 20px;">Send application</button>
             </form>
         </div>
-        <div class="card" style="max-width: 600px; margin: 24px auto 0;">
-            <h3 style="font-size:18px;">Already applied?</h3>
-            <input type="text" id="statusCheckName" placeholder="Enter the full name you applied with">
-            <button class="action-btn" style="width:100%;" onclick="checkApplicationStatus()">Check status</button>
-            <div id="statusResult" style="margin-top: 14px;"></div>
-        </div>
     </div>
 
     <!-- LOGIN SECTION -->
@@ -1392,27 +1386,8 @@
             showLoading(false);
         }
 
-        async function checkApplicationStatus() {
-            const name = document.getElementById('statusCheckName').value.trim();
-            const box = document.getElementById('statusResult');
-            if (!name) { box.innerHTML = ''; return; }
-            try {
-                const rows = await listRows(TABLES.applications, [Query.equal('name', name)]);
-                if (!rows.length) { box.innerHTML = `<div class="empty-state" style="padding:20px;">No application found under that name.</div>`; return; }
-                let html = '';
-                rows.forEach(a => {
-                    const color = a.status === 'Accepted' ? 'var(--secondary-color)' : (a.status === 'Denied' ? '#ff2e6b' : '#ffb84d');
-                    html += `<div class="cred-reveal"><p style="margin:4px 0;"><strong>${a.role}</strong></p><p style="margin:4px 0; color:${color}; font-weight:800;">${a.status}</p></div>`;
-                });
-                box.innerHTML = html;
-            } catch (e) {
-                console.error(e);
-                box.innerHTML = `<div class="empty-state" style="padding:20px;">Couldn't check that right now — try again shortly.</div>`;
-            }
-        }
-
         // ==========================================
-        // 6. ADMIN — APPLICATIONS & STAFF LOGIN MANAGEMENT
+        // 6. ADMIN — APPLICATIONS &amp; STAFF LOGIN MANAGEMENT
         // ==========================================
         function listenToApplications() {
             async function refresh() {
