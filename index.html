@@ -1011,16 +1011,31 @@
 
         function renderNotificationsList(list) {
             const sorted = [...list].sort((a, b) => new Date(b.$createdAt) - new Date(a.$createdAt));
-            const html = sorted.length ? sorted.map(n => `
+            const buildItem = (n, withDelete) => `
                 <div class="notif-item">
                     <div class="n-title">${n.title}</div>
                     <div>${n.body}</div>
                     <div class="n-meta">from ${n.sentBy || 'Uprising Studios'}</div>
-                </div>`).join('') : '<div class="empty-state">No notifications yet.</div>';
+                    ${withDelete ? `<button class="action-btn danger-btn" style="margin-top:10px; padding:6px 12px; font-size:12.5px;" onclick="deleteNotification('${n.id}')">Delete</button>` : ''}
+                </div>`;
+            const adminHtml = sorted.length ? sorted.map(n => buildItem(n, true)).join('') : '<div class="empty-state">No notifications yet.</div>';
+            const staffHtml = sorted.length ? sorted.map(n => buildItem(n, false)).join('') : '<div class="empty-state">No notifications yet.</div>';
             const a = document.getElementById('admin-notifications-list');
             const s = document.getElementById('staff-notifications-list');
-            if (a) a.innerHTML = html;
-            if (s) s.innerHTML = html;
+            if (a) a.innerHTML = adminHtml;
+            if (s) s.innerHTML = staffHtml;
+        }
+
+        async function deleteNotification(docId) {
+            const ok = await confirmDialog("Delete this notification?");
+            if (!ok) return;
+            try {
+                await deleteRow(TABLES.notifications, docId);
+                showToast("Notification deleted.", 'success');
+            } catch (e) {
+                console.error(e);
+                showToast("Couldn't delete that — check your connection and try again.", 'error');
+            }
         }
 
         (async function initNotifications() {
@@ -1414,6 +1429,7 @@
                                     <button class="action-btn" style="flex:1;" ${data.status==='Accepted' ? 'disabled' : ''} onclick="handleApp('${data.id}', 'Accepted')">Accept</button>
                                     <button class="action-btn danger-btn" style="flex:1;" ${data.status==='Denied' ? 'disabled' : ''} onclick="handleApp('${data.id}', 'Denied')">Deny</button>
                                 </div>
+                                <button class="action-btn danger-btn" style="width:100%; margin-top:10px;" onclick="deleteApplication('${data.id}')">Delete application</button>
                             </div>
                         `;
                     });
@@ -1429,6 +1445,18 @@
             } catch (e) {
                 console.error(e);
                 showToast("Couldn't update that application — check your connection and try again.", 'error');
+            }
+        }
+
+        async function deleteApplication(docId) {
+            const ok = await confirmDialog("Delete this application? This can't be undone.");
+            if (!ok) return;
+            try {
+                await deleteRow(TABLES.applications, docId);
+                showToast("Application deleted.", 'success');
+            } catch (e) {
+                console.error(e);
+                showToast("Couldn't delete that — check your connection and try again.", 'error');
             }
         }
 
@@ -1458,6 +1486,7 @@
                                     <button class="action-btn" style="flex:1; padding:10px 14px; font-size:13.5px;" onclick="updateLogin('${data.id}')">Save changes</button>
                                     <button class="action-btn edit-btn" style="flex:1; padding:10px 14px; font-size:13.5px;" onclick="sendStaffPasswordReset('${data.email}')">📧 Reset password</button>
                                 </div>
+                                <button class="action-btn danger-btn" style="width:100%; margin-top:8px; padding:10px 14px; font-size:13.5px;" onclick="removeStaffAccess('${data.id}', '${data.email}')">🗑 Remove access</button>
                             </div>
                         `;
                     });
@@ -1490,6 +1519,25 @@
             } catch (e) {
                 console.error(e);
                 showToast("Couldn't send a reset email for that address.", 'error');
+            }
+        }
+
+        // The client SDK can't delete another user's Appwrite Auth account —
+        // that requires a server API key, which intentionally stays out of
+        // reach of anyone who only has access to this front-end code. Instead,
+        // this deletes their staff_profiles row. Since routeAuthenticatedUser
+        // signs anyone out who has no admin/staff row on login, this fully
+        // revokes their access to every dashboard — the account technically
+        // still exists in Appwrite's Auth, but it can no longer get in anywhere.
+        async function removeStaffAccess(docId, email) {
+            const ok = await confirmDialog(`Remove ${email}'s access? They'll be signed out of every dashboard immediately and won't be able to log back in.`);
+            if (!ok) return;
+            try {
+                await deleteRow(TABLES.staffProfiles, docId);
+                showToast("Access removed.", 'success');
+            } catch (e) {
+                console.error(e);
+                showToast("Couldn't remove that account — check your connection and try again.", 'error');
             }
         }
 
